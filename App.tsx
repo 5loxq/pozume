@@ -8,6 +8,7 @@ import FoldersScreen from './src/screens/FoldersScreen';
 import TrashScreen from './src/screens/TrashScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import AiScreen from './src/screens/AiScreen';
+import TasksScreen from './src/screens/TasksScreen';
 import LockScreen from './src/screens/LockScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock } from './src/api/store';
@@ -22,7 +23,8 @@ type Route =
   | { name: 'trash' }
   | { name: 'settings' }
   | { name: 'tagNotes'; tag: string }
-  | { name: 'ai' };
+  | { name: 'ai' }
+  | { name: 'tasks' };
 
 export default function App() {
   const [client, setClient] = useState<PoznoteClient | null>(null);
@@ -139,6 +141,15 @@ export default function App() {
     );
   }
 
+  if (route.name === 'tasks') {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <TasksScreen client={client} onOpenNote={openNote} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
   if (route.name === 'ai') {
     return (
       <>
@@ -224,7 +235,8 @@ export default function App() {
         onOpenTrash={() => setRoute({ name: 'trash' })}
         onOpenSettings={() => setRoute({ name: 'settings' })}
         onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })}
-        onOpenAi={() => setRoute({ name: 'ai' })} />
+        onOpenAi={() => setRoute({ name: 'ai' })}
+        onOpenTasks={() => setRoute({ name: 'tasks' })} />
     </>
   );
 }

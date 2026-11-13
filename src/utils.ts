@@ -30,3 +30,18 @@ export function excerpt(content?: string, max = 120): string {
     .trim();
   return text.length > max ? text.slice(0, max).trimEnd() + '…' : text;
 }
+
+/** Checkbox-Aufgaben aus Markdown extrahieren: [ ] offen, [x] erledigt */
+export interface Task { noteId: number; noteHeading: string; text: string; done: boolean; lineIndex: number }
+
+export function extractTasks(content: string | undefined, noteId: number, noteHeading: string): Task[] {
+  if (!content) return [];
+  const out: Task[] = [];
+  content.split('\n').forEach((line, i) => {
+    const m = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.*)$/);
+    if (m) {
+      out.push({ noteId, noteHeading, text: m[2].trim(), done: m[1].toLowerCase() === 'x', lineIndex: i });
+    }
+  });
+  return out;
+}

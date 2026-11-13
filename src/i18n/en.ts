@@ -110,4 +110,9 @@ export const en: Record<TranslationKey, string> = {
   'lock.noteLocked': 'This note is protected',
   'settings.ipad': 'iPad layout',
   'settings.ipadOn': 'Two-column view',
+  'tasks.title': 'Tasks',
+  'tasks.empty': 'No open tasks — all done!',
+  'tasks.fromNote': 'from',
+  'tasks.open': 'open',
+  'tasks.done': 'done',
 };

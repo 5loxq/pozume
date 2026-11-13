@@ -108,5 +108,10 @@ export const de = {
   'lock.noteLocked': 'Diese Notiz ist geschützt',
   'settings.ipad': 'iPad-Layout',
   'settings.ipadOn': 'Zwei-Spalten-Ansicht',
+  'tasks.title': 'Aufgaben',
+  'tasks.empty': 'Keine offenen Aufgaben — alles erledigt!',
+  'tasks.fromNote': 'aus',
+  'tasks.open': 'offen',
+  'tasks.done': 'erledigt',
 } as const;
 export type TranslationKey = keyof typeof de;
