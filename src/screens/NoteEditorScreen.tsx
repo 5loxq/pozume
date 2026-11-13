@@ -5,9 +5,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Share } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { setReminder, removeReminder, getReminder } from '../api/reminders';
+import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
-import { colors, spacing, radius, type } from '../theme';
+import { colors, spacing, radius, type, primaryButton } from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 
@@ -85,9 +87,79 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   };
 
   const [preview, setPreview] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [pinPrompt, setPinPrompt] = useState(false);
+  const [pinInput, setPinInput] = useState('');
 
   const isFavorite = !!(note?.favorite);
+
+  // Gespuerrte Notiz: PIN verlangen (einmal pro Oeffnen)
+  useEffect(() => {
+    if (note?.id == null) return;
+    isNoteLocked(note.id).then((v) => {
+      if (v) { setLocked(true); setPinPrompt(true); }
+    });
+  }, [note?.id]);
+
+  const tryUnlock = async () => {
+    if (await verifyPin(pinInput)) {
+      setLocked(false); setPinPrompt(false); setPinInput('');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      setPinInput('');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  const toggleNoteLock = async () => {
+    if (noteId == null) return;
+    if (await isNoteLocked(noteId)) {
+      await unlockNoteRecord(noteId);
+      Alert.alert('🪶', t('lock.unlockNote'));
+    } else {
+      if (!(await hasPin())) {
+        Alert.prompt(t('lock.enterPass'), '4–8 Ziffern', [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('common.save'), onPress: async (pin?: string) => {
+              if (pin && /^\d{4,8}$/.test(pin)) { await setPin(pin); await lockNote(noteId); Alert.alert('🔒', t('lock.noteLock')); }
+            } },
+        ], 'secure-text');
+      } else {
+        await lockNote(noteId);
+        Alert.alert('🔒', t('lock.noteLock'));
+      }
+    }
+  };
   const [showPicker, setShowPicker] = useState(false);
+
+  const promptReminder = () => {
+    if (noteId == null) return;
+    Alert.prompt(
+      t('reminder.set'),
+      t('reminder.at') + ' (HH:MM)',
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.save'),
+          onPress: async (time?: string) => {
+            const m = time?.match(/^(\d{1,2}):(\d{2})$/);
+            if (!m) return;
+            const d = new Date();
+            d.setHours(parseInt(m[1], 10), parseInt(m[2], 10), 0, 0);
+            if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+            try {
+              await setReminder(noteId, latest.current.heading || 'Notiz', d.toISOString());
+              Alert.alert('🪶', t('reminder.saved'));
+            } catch (e: any) {
+              Alert.alert(t('common.error'), e?.message === 'no-permission' ? 'Benachrichtigungen erlauben!' : String(e?.message ?? e));
+            }
+          },
+        },
+      ],
+      'plain-text',
+      new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
+    );
+  };
 
   const shareNote = async () => {
     try {
@@ -125,6 +197,27 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     saveState === 'saved' ? t('editor.saved') :
     saveState === 'dirty' ? t('editor.unsaved') : '';
 
+  if (locked && pinPrompt) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl }}>
+          <Text style={{ fontSize: 52, marginBottom: spacing.lg }}>🔒</Text>
+          <Text style={[type.h2, { marginBottom: spacing.lg }]}>{t('lock.noteLocked')}</Text>
+          <TextInput
+            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.lg, fontSize: 22, letterSpacing: 8, textAlign: 'center', width: 200, color: colors.text }}
+            secureTextEntry keyboardType="number-pad" maxLength={8}
+            value={pinInput} onChangeText={setPinInput}
+            onSubmitEditing={tryUnlock}
+            autoFocus
+          />
+          <TouchableOpacity style={[primaryButton, { marginTop: spacing.lg, paddingHorizontal: spacing.xxl }]} onPress={tryUnlock}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{t('lock.unlockNote')}</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <View style={styles.topBar}>
@@ -142,6 +235,12 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
             </TouchableOpacity>
             <TouchableOpacity onPress={shareNote} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.folderIcon}>↗</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={promptReminder} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.folderIcon}>⏰</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={toggleNoteLock} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.folderIcon}>🔒</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={toggleFavorite}
@@ -211,7 +310,7 @@ const styles = StyleSheet.create({
   },
   back: { fontSize: 26, color: colors.text, width: 40 },
   status: { ...type.muted, flex: 1, textAlign: 'center' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 14, width: 110, justifyContent: 'flex-end' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, width: 130, justifyContent: 'flex-end' },
   starBtn: { fontSize: 22, color: colors.textFaint },
   folderIcon: { fontSize: 20 },
   starActive: { color: colors.star },

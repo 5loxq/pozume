@@ -22,6 +22,14 @@
       "image": "./assets/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#f6f7fb"
-    }
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "mode": "broadcast"
+        }
+      ]
+    ]
   }
 }

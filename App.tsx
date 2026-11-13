@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import LoginScreen from './src/screens/LoginScreen';
 import NotesListScreen from './src/screens/NotesListScreen';
@@ -28,6 +28,8 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [route, setRoute] = useState<Route>({ name: 'list' });
   const [, forceRender] = useState(0);
+  const { width } = useWindowDimensions();
+  const isWide = width >= 768;
 
   // Boot: Zugangsdaten + App-Lock + Sprach-Override laden
   useEffect(() => {
@@ -86,6 +88,32 @@ export default function App() {
       <>
         <StatusBar style="dark" />
         <LockScreen onUnlocked={() => setLocked(false)} />
+      </>
+    );
+  }
+
+  if (route.name === 'editor' && isWide) {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.bg }}>
+          <View style={{ width: '42%', borderRightWidth: 1, borderRightColor: colors.border }}>
+            <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
+              onOpenFolders={() => setRoute({ name: 'folders' })}
+              onOpenTrash={() => setRoute({ name: 'trash' })}
+              onOpenSettings={() => setRoute({ name: 'settings' })}
+              onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <NoteEditorScreen
+              client={client}
+              note={route.note}
+              onClose={closeEditor}
+              onSaved={() => {}}
+              onDeleted={onDeleted}
+            />
+          </View>
+        </View>
       </>
     );
   }
