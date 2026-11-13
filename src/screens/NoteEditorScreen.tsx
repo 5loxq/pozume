@@ -225,7 +225,7 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setPreview((v) => !v)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity onPress={() => { if (saveTimer.current) { clearTimeout(saveTimer.current); persist(); } setPreview((v) => !v); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.previewBtn}>{preview ? t('editor.write') : t('editor.preview')}</Text>
         </TouchableOpacity>
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>

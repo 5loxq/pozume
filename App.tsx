@@ -30,6 +30,7 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [route, setRoute] = useState<Route>({ name: 'list' });
   const [, forceRender] = useState(0);
+  const [allNotes, setAllNotes] = useState<Note[]>([]);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
@@ -39,8 +40,10 @@ export default function App() {
       try {
         const stored = await loadServer();
         if (stored) {
-          setClient(new PoznoteClient(stored));
+          const c = new PoznoteClient(stored);
+          setClient(c);
           setLocked(await getAppLock());
+          c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
         }
         await loadLocaleOverride();
       } finally {
@@ -55,6 +58,7 @@ export default function App() {
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
     import('./src/api/store').then((m) => m.saveServer(c.cfg)).catch(() => {});
+    c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
   }, []);
 
   const openNote = useCallback((note: Note) => setRoute({ name: 'editor', note }), []);
@@ -139,7 +143,7 @@ export default function App() {
     return (
       <>
         <StatusBar style="dark" />
-        <AiScreen client={client} notes={[]} onBack={() => setRoute({ name: 'list' })} />
+        <AiScreen client={client} notes={allNotes} onBack={() => setRoute({ name: 'list' })} />
       </>
     );
   }

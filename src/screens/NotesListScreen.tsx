@@ -76,6 +76,12 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
 
   useEffect(() => { load(); }, [load]);
 
+  // Beim Rueckkehr-Fokus (z.B. aus Editor) still aktualisieren
+  useEffect(() => {
+    const unsub = setTimeout(() => load({ silent: true }), 120);
+    return () => clearTimeout(unsub);
+  }, [load]);
+
   const visible = useMemo(() => {
     let out = notes;
     if (showFavorites) out = out.filter((n) => n.favorite);
