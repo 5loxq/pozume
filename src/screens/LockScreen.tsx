@@ -34,7 +34,7 @@ export default function LockScreen({ onUnlocked }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.owl}>🦉</Text>
+      <Text style={styles.owl}>🪶</Text>
       <Text style={styles.title}>{t('lock.title')}</Text>
       <TouchableOpacity style={styles.button} onPress={authenticate} disabled={busy}>
         <Text style={styles.buttonText}>{t('lock.faceId')}</Text>

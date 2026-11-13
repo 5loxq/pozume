@@ -1,4 +1,4 @@
-# Pozume 🦉
+# Pozume 🪶
 
 **A native iOS & Android app for [Poznote](https://github.com/timothepoznanski/poznote)** — the free, self-hosted note-taking platform.
 

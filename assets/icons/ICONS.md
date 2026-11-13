@@ -1,4 +1,4 @@
-# Pozume Icon-Quellen 🦉
+# Pozume Icon-Quellen 🪶
 
 Alle Icons sind hier **vektorbasiert als SVG** gespeichert — jederzeit neu skalier- und einfärbar.
 

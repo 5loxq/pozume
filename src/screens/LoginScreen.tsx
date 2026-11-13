@@ -34,7 +34,7 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
         <View style={styles.hero}>
           <View style={styles.blobOne} />
           <View style={styles.blobTwo} />
-          <Text style={styles.owl}>🦉</Text>
+          <Text style={styles.owl}>🪶</Text>
           <Text style={styles.title}>Pozume</Text>
           <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
         </View>
@@ -52,7 +52,7 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
           <TouchableOpacity style={[styles.button, busy && styles.buttonBusy]} onPress={connect} disabled={busy} activeOpacity={0.8}>
             {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('login.connect')}</Text>}
           </TouchableOpacity>
-          <Text style={styles.hint}>🦉 {t('login.hint')}</Text>
+          <Text style={styles.hint}>🪶 {t('login.hint')}</Text>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
