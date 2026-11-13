@@ -13,9 +13,13 @@ interface Props {
   client: PoznoteClient;
   onOpenNote: (note: Note) => void;
   onCreateNote: () => void;
+  folderId?: number;
+  title?: string;
+  onBack?: () => void;
+  onOpenFolders?: () => void;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -28,7 +32,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote }: Pr
     if (!opts.silent) setLoading(true);
     setError(null);
     try {
-      const res = await client.listNotes();
+      const res = await client.listNotes(folderId != null ? { folder_id: folderId } : {});
       setNotes(res.notes ?? []);
     } catch (e: any) {
       setError(e?.message ?? String(e));
@@ -55,7 +59,19 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote }: Pr
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.greeting}>{t('list.greeting')}</Text>
+      <View style={styles.titleRow}>
+        {onBack ? (
+          <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.backBtn}>←</Text>
+          </TouchableOpacity>
+        ) : null}
+        <Text style={[styles.greeting, styles.greetingFlex]}>{title ?? t('list.greeting')}</Text>
+        {onOpenFolders ? (
+          <TouchableOpacity style={styles.folderBtn} onPress={onOpenFolders}>
+            <Text style={styles.folderBtnText}>📁</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
       <View style={styles.searchWrap}>
         <TextInput
           style={styles.searchInput}
@@ -139,6 +155,11 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   listContent: { padding: spacing.lg, paddingBottom: 100 },
   header: { marginBottom: spacing.lg },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
+  greetingFlex: { flex: 1, marginBottom: 0 },
+  backBtn: { fontSize: 28, color: colors.text, marginRight: spacing.md },
+  folderBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', ...shadow },
+  folderBtnText: { fontSize: 19 },
   greeting: { ...type.title, marginBottom: spacing.lg },
   searchWrap: { marginBottom: spacing.md },
   searchInput: {

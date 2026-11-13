@@ -32,5 +32,16 @@ export const de = {
   'editor.deleteConfirmTitle': 'Notiz löschen?',
   'editor.deleteConfirmText': 'Die Notiz wandert in den Papierkorb.',
   'tags.addTag': 'Tags (Komma-getrennt)',
+  'folders.newPlaceholder': 'Neuer Ordner…',
+  'folders.empty': 'Noch keine Ordner',
+  'folders.notesIn': 'Notizen in diesem Ordner',
+  'editor.favoriteAdd': 'Zu Favoriten hinzufügen',
+  'editor.favoriteRemove': 'Aus Favoriten entfernen',
+  'lock.title': 'Pozume gesperrt',
+  'lock.unlock': 'Entsperren',
+  'lock.faceId': 'Face ID / Codesperre verwenden',
+  'lock.enabled': 'App-Lock aktiv',
+  'lock.disabled': 'App-Lock aus',
+  'settings.security': 'Sicherheit',
 } as const;
 export type TranslationKey = keyof typeof de;

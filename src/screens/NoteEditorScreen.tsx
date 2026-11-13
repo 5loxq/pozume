@@ -78,6 +78,17 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     ]);
   };
 
+  const isFavorite = !!(note?.favorite);
+  const toggleFavorite = async () => {
+    if (noteId == null) return;
+    try {
+      await client.updateNote(noteId, { favorite: !isFavorite });
+      onSaved({ ...(note as Note), favorite: !isFavorite });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
   const statusLabel =
     saveState === 'saving' ? t('editor.saving') :
     saveState === 'saved' ? t('editor.saved') :
@@ -91,9 +102,16 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         </TouchableOpacity>
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
         {!isNew && (
-          <TouchableOpacity onPress={confirmDelete} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={styles.delete}>🗑</Text>
-          </TouchableOpacity>
+          <View style={styles.actions}>
+            <TouchableOpacity
+              onPress={toggleFavorite}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={[styles.starBtn, isFavorite && styles.starActive]}>{isFavorite ? '★' : '☆'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={confirmDelete} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.delete}>🗑</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -135,7 +153,10 @@ const styles = StyleSheet.create({
   },
   back: { fontSize: 26, color: colors.text, width: 40 },
   status: { ...type.muted, flex: 1, textAlign: 'center' },
-  delete: { fontSize: 20, width: 40, textAlign: 'right' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 18, width: 90, justifyContent: 'flex-end' },
+  starBtn: { fontSize: 22, color: colors.textFaint },
+  starActive: { color: colors.star },
+  delete: { fontSize: 20 },
   content: { padding: spacing.lg, paddingBottom: 60 },
   titleInput: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: spacing.md },
   contentInput: { fontSize: 16, lineHeight: 25, color: colors.text, minHeight: 300 },
