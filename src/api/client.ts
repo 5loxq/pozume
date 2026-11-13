@@ -71,7 +71,7 @@ export class PoznoteClient {
   }
 
   updateNote(id: number, patch: Partial<Pick<Note, 'heading' | 'content' | 'tags' | 'folder_id' | 'favorite'>>) {
-    return this.req<{ success: boolean }>(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
+    return this.req<{ success: boolean }>(`/notes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
   deleteNote(id: number) {
