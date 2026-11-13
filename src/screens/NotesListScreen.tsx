@@ -4,7 +4,7 @@ import {
   StyleSheet, RefreshControl, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow } from '../theme';
+import { colors, spacing, radius, type, shadow, shadowSoft, greetingForHour } from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
@@ -83,7 +83,12 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
             <Text style={styles.backBtn}>←</Text>
           </TouchableOpacity>
         ) : null}
-        <Text style={[styles.greeting, styles.greetingFlex]}>{title ?? t('list.greeting')}</Text>
+        <View style={styles.greetingFlex}>
+          <Text style={styles.greeting}>{title ?? greetingForHour(new Date().getHours(), locale)}</Text>
+          <Text style={styles.countText}>
+            {visible.length === 1 ? t('list.countNote') : t('list.countNotes', { n: visible.length })}
+          </Text>
+        </View>
         <View style={styles.headerBtns}>
           {onOpenFolders ? (
             <TouchableOpacity style={styles.folderBtn} onPress={onOpenFolders}>
@@ -141,6 +146,14 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
         </View>
       );
     }
+    if (visible.length === 0 && search.trim()) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.emptyEmoji}>🔍</Text>
+          <Text style={styles.emptyTitle}>{t('list.searchEmpty', { q: search.trim() })}</Text>
+        </View>
+      );
+    }
     if (visible.length === 0) {
       return (
         <View style={styles.center}>
@@ -186,7 +199,8 @@ const styles = StyleSheet.create({
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
   folderBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', ...shadow },
   folderBtnText: { fontSize: 19 },
-  greeting: { ...type.title, marginBottom: spacing.lg },
+  greeting: { ...type.title, fontSize: 26 },
+  countText: { ...type.faint(), marginTop: 2 },
   searchWrap: { marginBottom: spacing.md },
   searchInput: {
     backgroundColor: colors.surface, borderRadius: radius.pill,
@@ -196,8 +210,9 @@ const styles = StyleSheet.create({
   },
   filterRow: { flexDirection: 'row', gap: spacing.sm },
   chip: {
-    borderRadius: radius.pill, paddingVertical: 7, paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: spacing.lg,
     backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    ...shadowSoft,
   },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },

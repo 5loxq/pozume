@@ -158,10 +158,10 @@ const styles = StyleSheet.create({
   starActive: { color: colors.star },
   delete: { fontSize: 20 },
   content: { padding: spacing.lg, paddingBottom: 60 },
-  titleInput: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: spacing.md },
-  contentInput: { fontSize: 16, lineHeight: 25, color: colors.text, minHeight: 300 },
+  titleInput: { fontSize: 28, fontWeight: '800', letterSpacing: -0.4, color: colors.text, marginBottom: spacing.md },
+  contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {
-    marginTop: spacing.lg, fontSize: 14, color: colors.primary,
+    marginTop: spacing.lg, fontSize: 14, fontWeight: '600', color: colors.primary,
     backgroundColor: colors.primarySoft, borderRadius: radius.pill,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },

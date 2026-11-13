@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, spacing, radius, type, shadow, shadowSoft, primaryButton } from '../theme';
 import { t } from '../i18n';
 import { PoznoteClient } from '../api';
+import { saveServer } from '../api/store';
 
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
   const [serverUrl, setServerUrl] = useState('');
@@ -15,7 +18,8 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
     try {
       const base = serverUrl.replace(/\/+$/, '');
       const client = new PoznoteClient({ baseUrl: base, username, password });
-      const res = await client.listNotes();
+      await client.listNotes();
+      await saveServer({ baseUrl: base, username, password }).catch(() => {});
       onConnected(client);
     } catch (e: any) {
       setError(e.message ?? String(e));
@@ -25,31 +29,64 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{t('login.title')}</Text>
-      <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
-      <TextInput style={styles.input} placeholder={t('login.serverUrl')}
-        autoCapitalize="none" keyboardType="url" value={serverUrl} onChangeText={setServerUrl} />
-      <TextInput style={styles.input} placeholder={t('login.username')}
-        autoCapitalize="none" value={username} onChangeText={setUsername} />
-      <TextInput style={styles.input} placeholder={t('login.password')} secureTextEntry
-        value={password} onChangeText={setPassword} />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TouchableOpacity style={styles.button} onPress={connect} disabled={busy}>
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('login.connect')}</Text>}
-      </TouchableOpacity>
-      <Text style={styles.hint}>{t('login.hint')}</Text>
-    </View>
+    <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.hero}>
+          <View style={styles.blobOne} />
+          <View style={styles.blobTwo} />
+          <Text style={styles.owl}>🦉</Text>
+          <Text style={styles.title}>Pozume</Text>
+          <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
+        </View>
+        <View style={styles.form}>
+          <TextInput style={styles.input} placeholder={t('login.serverUrl')}
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none" autoCorrect={false} keyboardType="url" value={serverUrl} onChangeText={setServerUrl} />
+          <TextInput style={styles.input} placeholder={t('login.username')}
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none" autoCorrect={false} value={username} onChangeText={setUsername} />
+          <TextInput style={styles.input} placeholder={t('login.password')} secureTextEntry
+            placeholderTextColor={colors.textFaint}
+            value={password} onChangeText={setPassword} />
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <TouchableOpacity style={[styles.button, busy && styles.buttonBusy]} onPress={connect} disabled={busy} activeOpacity={0.8}>
+            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{t('login.connect')}</Text>}
+          </TouchableOpacity>
+          <Text style={styles.hint}>🦉 {t('login.hint')}</Text>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  title: { fontSize: 28, fontWeight: '700', marginBottom: 8 },
-  subtitle: { fontSize: 15, color: '#666', marginBottom: 24 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 14, marginBottom: 12, fontSize: 16 },
-  button: { backgroundColor: '#2563eb', borderRadius: 10, padding: 16, alignItems: 'center', marginTop: 8 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  error: { color: '#dc2626', marginBottom: 8, fontSize: 14 },
-  hint: { color: '#999', fontSize: 13, textAlign: 'center', marginTop: 16 },
+  safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  hero: { alignItems: 'center', paddingTop: spacing.xxl, paddingBottom: spacing.xl },
+  blobOne: {
+    position: 'absolute', top: -60, left: -40,
+    width: 220, height: 220, borderRadius: 110,
+    backgroundColor: colors.primarySoft, opacity: 0.8,
+  },
+  blobTwo: {
+    position: 'absolute', top: 30, right: -50,
+    width: 160, height: 160, borderRadius: 80,
+    backgroundColor: '#e0f2fe', opacity: 0.7,
+  },
+  owl: { fontSize: 64 },
+  title: { fontSize: 34, fontWeight: '800', letterSpacing: -1, color: colors.text, marginTop: spacing.md },
+  subtitle: { ...type.muted, textAlign: 'center', marginTop: spacing.xs, paddingHorizontal: spacing.xl },
+  form: { flex: 1, paddingHorizontal: spacing.xl, justifyContent: 'center' },
+  input: {
+    backgroundColor: colors.surface, borderRadius: radius.md,
+    paddingHorizontal: spacing.lg, paddingVertical: 15, fontSize: 16,
+    color: colors.text, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: colors.border,
+    ...shadowSoft,
+  },
+  button: { ...primaryButton, marginTop: spacing.md },
+  buttonBusy: { opacity: 0.7 },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  error: { color: colors.danger, fontSize: 13, marginTop: spacing.sm, textAlign: 'center' },
+  hint: { ...type.faint(), textAlign: 'center', marginTop: spacing.xl, lineHeight: 18 },
 });

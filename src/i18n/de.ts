@@ -52,5 +52,9 @@ export const de = {
   'trash.deleteForeverText': 'Diese Notiz lässt sich nicht wiederherstellen.',
   'trash.restored': 'Wiederhergestellt',
   'list.trashBtn': 'Papierkorb öffnen',
+  'list.greetingMorning': 'Guten Morgen',
+  'list.countNotes': '{n} Notizen',
+  'list.countNote': '1 Notiz',
+  'list.searchEmpty': 'Nichts gefunden für „{q}“',
 } as const;
 export type TranslationKey = keyof typeof de;

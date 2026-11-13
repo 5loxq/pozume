@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, spacing, radius, type, shadow } from '../theme';
+import { colors, spacing, radius, type, shadow, tagColors } from '../theme';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
 import type { Note } from '../api';
 
@@ -13,18 +13,23 @@ interface Props {
 export default function NoteCard({ note, locale, onPress }: Props) {
   const tags = parseTags(note.tags);
   return (
-    <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.7} onPress={() => onPress(note)}>
+    <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => onPress(note)}>
       <View style={styles.headerRow}>
-        <Text style={styles.title} numberOfLines={1}>{note.heading || '…'}</Text>
+        <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
         {note.favorite ? <Text style={styles.star}>★</Text> : null}
       </View>
       {excerpt(note.content) ? (
         <Text style={styles.excerpt} numberOfLines={2}>{excerpt(note.content)}</Text>
       ) : null}
       <View style={styles.footerRow}>
-        {tags.slice(0, 3).map((tag) => (
-          <View key={tag} style={styles.tag}><Text style={styles.tagText}>{tag}</Text></View>
-        ))}
+        {tags.slice(0, 3).map((tag) => {
+          const c = tagColors(tag);
+          return (
+            <View key={tag} style={[styles.tag, { backgroundColor: c.bg }]}>
+              <Text style={[styles.tagText, { color: c.fg }]}>{tag}</Text>
+            </View>
+          );
+        })}
         <Text style={styles.date}>{formatRelativeDate(note.updated_at, locale)}</Text>
       </View>
     </TouchableOpacity>
@@ -37,19 +42,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(21,26,35,0.04)',
   },
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  title: { ...type.h2, flex: 1 },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
   star: { color: colors.star, fontSize: 18, marginLeft: spacing.sm },
-  excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 19 },
-  footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
+  excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 20 },
+  footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, gap: 6 },
   tag: {
-    backgroundColor: colors.primarySoft,
     borderRadius: radius.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    marginRight: spacing.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 2,
   },
-  tagText: { color: colors.primary, fontSize: 12, fontWeight: '600' },
+  tagText: { fontSize: 12, fontWeight: '600' },
   date: { ...type.faint(), marginLeft: 'auto', fontSize: 12 },
 });

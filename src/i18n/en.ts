@@ -53,4 +53,8 @@ export const en: Record<TranslationKey, string> = {
   'trash.deleteForeverText': 'This note cannot be restored.',
   'trash.restored': 'Restored',
   'list.trashBtn': 'Open trash',
+  'list.greetingMorning': 'Good morning',
+  'list.countNotes': '{n} notes',
+  'list.countNote': '1 note',
+  'list.searchEmpty': 'Nothing found for “{q}”',
 };

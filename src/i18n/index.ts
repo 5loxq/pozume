@@ -9,6 +9,10 @@ export function getLocale(): Locale {
   return tag.startsWith('en') ? 'en' : 'de';
 }
 
-export function t(key: TranslationKey, locale: Locale = getLocale()): string {
-  return dicts[locale][key] ?? key;
+export function t(key: TranslationKey, locale: Locale = getLocale(), vars?: Record<string, string | number>): string {
+  let out: string = dicts[locale][key] ?? key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, String(v));
+  }
+  return out;
 }
