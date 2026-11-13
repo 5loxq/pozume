@@ -10,6 +10,7 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import LockScreen from './src/screens/LockScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock } from './src/api/store';
+import { loadLocaleOverride, onLocaleChange } from './src/i18n';
 import { colors } from './src/theme';
 
 type Route =
@@ -26,8 +27,9 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [locked, setLocked] = useState(false);
   const [route, setRoute] = useState<Route>({ name: 'list' });
+  const [, forceRender] = useState(0);
 
-  // Boot: gespeicherte Zugangsdaten laden, App-Lock pruefen
+  // Boot: Zugangsdaten + App-Lock + Sprach-Override laden
   useEffect(() => {
     (async () => {
       try {
@@ -36,11 +38,15 @@ export default function App() {
           setClient(new PoznoteClient(stored));
           setLocked(await getAppLock());
         }
+        await loadLocaleOverride();
       } finally {
         setBooting(false);
       }
     })();
   }, []);
+
+  // Bei Sprachwechsel alles neu rendern
+  useEffect(() => onLocaleChange(() => forceRender((n) => n + 1)), []);
 
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
@@ -51,6 +57,12 @@ export default function App() {
   const createNote = useCallback(() => setRoute({ name: 'editor', note: null }), []);
   const closeEditor = useCallback(() => setRoute({ name: 'list' }), []);
   const onDeleted = useCallback(() => setRoute({ name: 'list' }), []);
+
+  const onLockToggle = useCallback((enabled: boolean) => {
+    // App-Lock-Status in store persistiert die Settings selbst; hier nur Cache aktualisieren
+    import('./src/api/store').then((m) => m.getAppLock()).then(setLocked).catch(() => {});
+    if (!enabled) setLocked(false);
+  }, []);
 
   if (booting) {
     return (
@@ -99,7 +111,7 @@ export default function App() {
         <StatusBar style="dark" />
         <SettingsScreen
           client={client}
-          onLockChange={() => {}}
+          onLockChange={onLockToggle}
           onLocaleChange={() => {}}
           onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); }}
           onBack={() => setRoute({ name: 'list' })}

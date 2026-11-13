@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius, type, shadow } from '../theme';
-import { t, Locale, getLocale } from '../i18n';
+import { t, Locale, getLocale, getLocaleMode, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer } from '../api/store';
 
@@ -18,7 +18,16 @@ interface Props {
 
 export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onBack }: Props) {
   const [lockEnabled, setLockEnabled] = useState(false);
+  const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const locale = getLocale();
+
+  useEffect(() => { loadLocaleOverride().then(setLocaleMode); }, []);
+
+  const setLang = async (mode: LocaleMode) => {
+    setLocaleMode(mode);
+    await saveLocaleOverride(mode);
+    onLocaleChange(mode);
+  };
 
   const toggleLock = async (v: boolean) => {
     setLockEnabled(v);
@@ -60,16 +69,17 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
 
         <Text style={styles.section}>{t('settings.language')}</Text>
         <View style={[styles.card, shadow]}>
-          <TouchableOpacity style={styles.row} onPress={() => onLocaleChange('auto')}>
-            <Text style={[styles.rowText, locale === 'de' || locale === 'en' ? null : styles.active]}>
-              🌐 {t('settings.languageAuto')}
-            </Text>
+          <TouchableOpacity style={styles.row} onPress={() => setLang('auto')}>
+            <Text style={[styles.rowText, localeMode === 'auto' && styles.active]}>🌐 {t('settings.languageAuto')}</Text>
+            {localeMode === 'auto' ? <Text style={styles.check}>✓</Text> : null}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => onLocaleChange('de')}>
-            <Text style={[styles.rowText, locale === 'de' && styles.active]}>🇩🇪 {t('settings.languageDe')}</Text>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setLang('de')}>
+            <Text style={[styles.rowText, localeMode === 'de' && styles.active]}>🇩🇪 {t('settings.languageDe')}</Text>
+            {localeMode === 'de' ? <Text style={styles.check}>✓</Text> : null}
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => onLocaleChange('en')}>
-            <Text style={[styles.rowText, locale === 'en' && styles.active]}>🇬🇧 {t('settings.languageEn')}</Text>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setLang('en')}>
+            <Text style={[styles.rowText, localeMode === 'en' && styles.active]}>🇬🇧 {t('settings.languageEn')}</Text>
+            {localeMode === 'en' ? <Text style={styles.check}>✓</Text> : null}
           </TouchableOpacity>
         </View>
 
@@ -113,4 +123,5 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: colors.danger, fontWeight: '700', fontSize: 15 },
   version: { ...type.faint(), textAlign: 'center', marginTop: spacing.xl },
+  check: { color: colors.primary, fontSize: 18, fontWeight: '700' },
 });
