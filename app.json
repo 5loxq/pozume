@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Pozume",
+    "slug": "pozume",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "pozume",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "de.inthielligent.pozume",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Pozume schützt deine Notizen mit Face ID."
+      }
+    },
+    "android": {
+      "package": "de.inthielligent.pozume"
+    }
+  }
+}
