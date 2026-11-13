@@ -33,6 +33,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
   const [search, setSearch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
+  const [sortBy, setSortBy] = useState<'updated' | 'created' | 'title'>('updated');
   const locale = getLocale();
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -82,9 +83,15 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
         (n.heading ?? '').toLowerCase().includes(q) ||
         (n.content ?? '').toLowerCase().includes(q));
     }
-    return out.sort((a, b) =>
-      new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
-  }, [notes, search, showFavorites]);
+    if (sortBy === 'title') {
+      out.sort((a, b) => (a.heading ?? '').localeCompare(b.heading ?? '', locale));
+    } else if (sortBy === 'created') {
+      out.sort((a, b) => new Date(a.updated_at ?? 0).getTime() - new Date(b.updated_at ?? 0).getTime());
+    } else {
+      out.sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
+    }
+    return out;
+  }, [notes, search, showFavorites, sortBy, locale]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -138,6 +145,16 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
           style={[styles.chip, showFavorites && styles.chipActive]}
           onPress={() => setShowFavorites(true)}>
           <Text style={[styles.chipText, showFavorites && styles.chipTextActive]}>★ {t('list.favorites')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chip, sortBy === 'title' && styles.chipActive]}
+          onPress={() => setSortBy((v) => (v === 'title' ? 'updated' : 'title'))}>
+          <Text style={[styles.chipText, sortBy === 'title' && styles.chipTextActive]}>A–Z</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.chip, sortBy === 'created' && styles.chipActive]}
+          onPress={() => setSortBy((v) => (v === 'created' ? 'updated' : 'created'))}>
+          <Text style={[styles.chipText, sortBy === 'created' && styles.chipTextActive]}>↑↓</Text>
         </TouchableOpacity>
       </View>
     </View>

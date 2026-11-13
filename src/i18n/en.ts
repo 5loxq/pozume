@@ -72,8 +72,15 @@ export const en: Record<TranslationKey, string> = {
   'settings.server': 'Server',
   'settings.logout': 'Sign out',
   'settings.logoutConfirm': 'Delete credentials from this device?',
-  'settings.version': 'Pozume v0.1',
   'tags.allNotesWithTag': 'Notes with tag',
   'share.noteTitle': 'Share note',
   'common.close': 'Close',
-};
+  'settings.version': 'Pozume v0.2',
+  'editor.wordCount': '{n} words',
+  'editor.readingTime': '{n} min read',
+  'list.sortUpdated': 'Last updated',
+  'list.sortCreated': 'Created',
+  'list.sortTitle': 'Title A–Z',
+  'list.sort': 'Sort',
+  'editor.boldHint': '**bold** and `code` are supported',
+} as const;

@@ -71,9 +71,16 @@ export const de = {
   'settings.server': 'Server',
   'settings.logout': 'Abmelden',
   'settings.logoutConfirm': 'Zugangsdaten vom Gerät löschen?',
-  'settings.version': 'Pozume v0.1',
   'tags.allNotesWithTag': 'Notizen mit Tag',
   'share.noteTitle': 'Notiz teilen',
   'common.close': 'Schließen',
+  'settings.version': 'Pozume v0.2',
+  'editor.wordCount': '{n} Wörter',
+  'editor.readingTime': '{n} Min. Lesezeit',
+  'list.sortUpdated': 'Zuletzt geändert',
+  'list.sortCreated': 'Erstellt',
+  'list.sortTitle': 'Titel A–Z',
+  'list.sort': 'Sortieren',
+  'editor.boldHint': '**fett** und `code` werden unterstützt',
 } as const;
 export type TranslationKey = keyof typeof de;

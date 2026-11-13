@@ -185,6 +185,11 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           onChangeText={(v) => { setTags(v); scheduleSave(); }}
           autoCapitalize="none"
         />
+        <Text style={styles.meta}>
+          {content.trim()
+            ? `${t('editor.wordCount', { n: content.trim().split(/\s+/).length })} · ${t('editor.readingTime', { n: Math.max(1, Math.ceil(content.trim().split(/\s+/).length / 200)) })}`
+            : ''}
+        </Text>
       </ScrollView>
       <FolderPickerSheet
         visible={showPicker}
@@ -214,6 +219,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: 60 },
   previewBtn: { color: colors.primary, fontWeight: '700', fontSize: 14, width: 80 },
   previewWrap: { minHeight: 300 },
+  meta: { ...type.faint(), textAlign: 'right', marginTop: spacing.lg },
   titleInput: { fontSize: 28, fontWeight: '800', letterSpacing: -0.4, color: colors.text, marginBottom: spacing.md },
   contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {
