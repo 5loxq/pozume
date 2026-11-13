@@ -22,7 +22,10 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
       await saveServer({ baseUrl: base, username, password }).catch(() => {});
       onConnected(client);
     } catch (e: any) {
-      setError(e.message ?? String(e));
+      const msg = String(e?.message ?? e);
+      setError(msg.includes('network') || msg.includes('Network request failed')
+        ? 'Server nicht erreichbar — Adresse und Verbindung prüfen.'
+        : msg);
     } finally {
       setBusy(false);
     }

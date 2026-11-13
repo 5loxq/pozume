@@ -9,14 +9,18 @@ Pozume connects to your **own** Poznote server. Your notes stay on your hardware
 ## Features
 
 - 📓 **Notes** — create, edit, autosave (1.2 s after last keystroke), delete to trash
-- 🔍 **Instant search** across titles and content, live-filtered
+- 🔍 **Instant search** across titles and content, debounced, live-filtered
 - ★ **Favorites** — filter chips + one-tap toggle in the editor
-- 📁 **Folders** — browse, create, per-folder note lists
+- 📁 **Folders** — browse, create, per-folder note lists, move notes via bottom sheet
+- 🏷 **Tags** — colored chips, tap a tag to see all notes with it
+- 📝 **Markdown preview** — toggle between writing and reading (headings, lists, bold, code, quotes)
 - 🗑 **Trash** — view, restore, delete forever
-- 📴 **Offline-first** — last known state from encrypted local cache, background refresh
+- 📤 **Share sheet** — share any note as formatted text
+- ⚙️ **Settings** — app lock toggle, language override, server info, sign out
+- 📴 **Offline-first** — last known state from local cache, background refresh
 - 🔒 **Security** — Face ID / Touch ID app lock, credentials in the iOS Keychain (SecureStore), app-password ready
-- 🌍 **Bilingual from day one** — German & English with automatic device-language detection
-- 🎨 **Own design system** — indigo/ivory palette, colored tag chips, time-of-day greeting
+- 🌍 **Bilingual from day one** — German & English, auto-detection + manual override, live switching
+- 🎨 **Own design system** — indigo/ivory palette, colored tag chips, time-of-day greeting, haptic feedback
 
 ## Getting started
 
@@ -57,9 +61,6 @@ src/
 
 ## Roadmap
 
-- [ ] Move note to folder (editor picker)
-- [ ] Markdown preview
-- [ ] Share sheet integration
 - [ ] Android build + adaptive icon
 - [ ] App Store / Play Store release
 

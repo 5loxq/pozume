@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Share } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
 import { colors, spacing, radius, type } from '../theme';
@@ -48,6 +49,7 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         onSaved({ ...(note as Note), ...body, updated_at: new Date().toISOString() });
       }
       setSaveState('saved');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       setSaveState('dirty');
       Alert.alert(t('common.error'), e?.message ?? String(e));
@@ -71,6 +73,7 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         text: t('common.delete'), style: 'destructive',
         onPress: async () => {
           try {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             await client.deleteNote(noteId);
             onDeleted(noteId);
           } catch (e: any) {

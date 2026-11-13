@@ -31,6 +31,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
   const locale = getLocale();
 
@@ -64,12 +65,18 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
     }
   }, [folderId]);
 
+  // Such-Debounce: Input sofort, Filter mit 300ms Verzoegerung
+  useEffect(() => {
+    const id = setTimeout(() => setSearchQuery(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
+
   useEffect(() => { load(); }, [load]);
 
   const visible = useMemo(() => {
     let out = notes;
     if (showFavorites) out = out.filter((n) => n.favorite);
-    const q = search.trim().toLowerCase();
+    const q = searchQuery.trim().toLowerCase();
     if (q) {
       out = out.filter((n) =>
         (n.heading ?? '').toLowerCase().includes(q) ||
@@ -159,7 +166,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
       return (
         <View style={styles.center}>
           <Text style={styles.emptyEmoji}>🔍</Text>
-          <Text style={styles.emptyTitle}>{t('list.searchEmpty', { q: search.trim() })}</Text>
+          <Text style={styles.emptyTitle}>{t('list.searchEmpty', { q: searchQuery.trim() })}</Text>
         </View>
       );
     }

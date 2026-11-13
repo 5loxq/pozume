@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, spacing, radius, type, shadow, tagColors } from '../theme';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
+import * as Haptics from 'expo-haptics';
 import type { Note } from '../api';
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
 export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   const tags = parseTags(note.tags);
   return (
-    <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => onPress(note)}>
+    <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(note); }}>
       <View style={styles.headerRow}>
         <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
         {note.favorite ? <Text style={styles.star}>★</Text> : null}
