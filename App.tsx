@@ -6,6 +6,7 @@ import NotesListScreen from './src/screens/NotesListScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import FoldersScreen from './src/screens/FoldersScreen';
 import TrashScreen from './src/screens/TrashScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import LockScreen from './src/screens/LockScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock } from './src/api/store';
@@ -16,7 +17,9 @@ type Route =
   | { name: 'editor'; note: Note | null }
   | { name: 'folders' }
   | { name: 'folderNotes'; folderId: number; folderName: string }
-  | { name: 'trash' };
+  | { name: 'trash' }
+  | { name: 'settings' }
+  | { name: 'tagNotes'; tag: string };
 
 export default function App() {
   const [client, setClient] = useState<PoznoteClient | null>(null);
@@ -90,6 +93,37 @@ export default function App() {
     );
   }
 
+  if (route.name === 'settings') {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <SettingsScreen
+          client={client}
+          onLockChange={() => {}}
+          onLocaleChange={() => {}}
+          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); }}
+          onBack={() => setRoute({ name: 'list' })}
+        />
+      </>
+    );
+  }
+
+  if (route.name === 'tagNotes') {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <NotesListScreen
+          client={client}
+          tag={route.tag}
+          title={`#${route.tag}`}
+          onOpenNote={openNote}
+          onCreateNote={createNote}
+          onBack={() => setRoute({ name: 'list' })}
+        />
+      </>
+    );
+  }
+
   if (route.name === 'trash') {
     return (
       <>
@@ -132,7 +166,9 @@ export default function App() {
       <StatusBar style="dark" />
       <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
         onOpenFolders={() => setRoute({ name: 'folders' })}
-        onOpenTrash={() => setRoute({ name: 'trash' })} />
+        onOpenTrash={() => setRoute({ name: 'trash' })}
+        onOpenSettings={() => setRoute({ name: 'settings' })}
+        onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })} />
     </>
   );
 }

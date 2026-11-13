@@ -3,7 +3,9 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Share } from 'react-native';
 import FolderPickerSheet from '../components/FolderPickerSheet';
+import MarkdownView from '../components/MarkdownView';
 import { colors, spacing, radius, type } from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
@@ -79,8 +81,19 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     ]);
   };
 
+  const [preview, setPreview] = useState(false);
+
   const isFavorite = !!(note?.favorite);
   const [showPicker, setShowPicker] = useState(false);
+
+  const shareNote = async () => {
+    try {
+      await Share.share({
+        title: latest.current.heading || 'Pozume',
+        message: `# ${latest.current.heading}\n\n${latest.current.content ?? ''}`,
+      });
+    } catch {}
+  };
   const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
 
   const moveToFolder = async (targetId: number | null) => {
@@ -115,11 +128,17 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setPreview((v) => !v)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={styles.previewBtn}>{preview ? t('editor.write') : t('editor.preview')}</Text>
+        </TouchableOpacity>
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
         {!isNew && (
           <View style={styles.actions}>
             <TouchableOpacity onPress={() => setShowPicker(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.folderIcon}>📁</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={shareNote} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.folderIcon}>↗</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={toggleFavorite}
@@ -140,15 +159,21 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           value={heading}
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
         />
-        <TextInput
-          style={styles.contentInput}
-          placeholder={t('editor.contentPlaceholder')}
-          placeholderTextColor={colors.textFaint}
-          value={content}
-          onChangeText={(v) => { setContent(v); scheduleSave(); }}
-          multiline
-          textAlignVertical="top"
-        />
+        {preview ? (
+          <View style={styles.previewWrap}>
+            <MarkdownView content={content} />
+          </View>
+        ) : (
+          <TextInput
+            style={styles.contentInput}
+            placeholder={t('editor.contentPlaceholder')}
+            placeholderTextColor={colors.textFaint}
+            value={content}
+            onChangeText={(v) => { setContent(v); scheduleSave(); }}
+            multiline
+            textAlignVertical="top"
+          />
+        )}
         <TextInput
           style={styles.tagsInput}
           placeholder={t('tags.addTag')}
@@ -178,12 +203,14 @@ const styles = StyleSheet.create({
   },
   back: { fontSize: 26, color: colors.text, width: 40 },
   status: { ...type.muted, flex: 1, textAlign: 'center' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 18, width: 90, justifyContent: 'flex-end' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 14, width: 110, justifyContent: 'flex-end' },
   starBtn: { fontSize: 22, color: colors.textFaint },
   folderIcon: { fontSize: 20 },
   starActive: { color: colors.star },
   delete: { fontSize: 20 },
   content: { padding: spacing.lg, paddingBottom: 60 },
+  previewBtn: { color: colors.primary, fontWeight: '700', fontSize: 14, width: 80 },
+  previewWrap: { minHeight: 300 },
   titleInput: { fontSize: 28, fontWeight: '800', letterSpacing: -0.4, color: colors.text, marginBottom: spacing.md },
   contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {

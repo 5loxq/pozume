@@ -8,9 +8,10 @@ interface Props {
   note: Note;
   locale: string;
   onPress: (note: Note) => void;
+  onTagPress?: (tag: string) => void;
 }
 
-export default function NoteCard({ note, locale, onPress }: Props) {
+export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   const tags = parseTags(note.tags);
   return (
     <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => onPress(note)}>
@@ -25,9 +26,12 @@ export default function NoteCard({ note, locale, onPress }: Props) {
         {tags.slice(0, 3).map((tag) => {
           const c = tagColors(tag);
           return (
-            <View key={tag} style={[styles.tag, { backgroundColor: c.bg }]}>
-              <Text style={[styles.tagText, { color: c.fg }]}>{tag}</Text>
-            </View>
+            <TouchableOpacity key={tag} activeOpacity={0.7}
+              onPress={onTagPress ? () => onTagPress(tag) : undefined}>
+              <View style={[styles.tag, { backgroundColor: c.bg }]}>
+                <Text style={[styles.tagText, { color: c.fg }]}>{tag}</Text>
+              </View>
+            </TouchableOpacity>
           );
         })}
         <Text style={styles.date}>{formatRelativeDate(note.updated_at, locale)}</Text>

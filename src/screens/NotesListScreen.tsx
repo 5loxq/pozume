@@ -19,9 +19,13 @@ interface Props {
   onBack?: () => void;
   onOpenFolders?: () => void;
   onOpenTrash?: () => void;
+  onOpenSettings?: () => void;
+  tag?: string;
+  onBackFromTag?: () => void;
+  onTagPress?: (tag: string) => void;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, tag, onBackFromTag, onTagPress }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -34,7 +38,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
     if (!opts.silent) setLoading(true);
     setError(null);
     try {
-      const res = await client.listNotes(folderId != null ? { folder_id: folderId } : {});
+      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(tag ? { tag } : {}) });
       setNotes(res.notes ?? []);
       cacheNotes(res.notes ?? []).catch(() => {});
     } catch (e: any) {
@@ -98,6 +102,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
           {onOpenTrash ? (
             <TouchableOpacity style={styles.folderBtn} onPress={onOpenTrash}>
               <Text style={styles.folderBtnText}>🗑</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenSettings ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenSettings}>
+              <Text style={styles.folderBtnText}>⚙️</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -172,7 +181,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
         data={visible}
         keyExtractor={(n) => String(n.id)}
         renderItem={({ item }) => (
-          <NoteCard note={item} locale={locale} onPress={onOpenNote} />
+          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} />
         )}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}
