@@ -53,8 +53,11 @@ export default function AiScreen({ client, notes, onBack }: Props) {
 
   const noteContext = (): string => {
     if (notes.length === 0) return '';
-    const list = notes.slice(0, 40).map((n) => `- „${n.heading}" (#${n.id})`).join('\n');
-    return `\n\n[Kontext: Der Nutzer hat diese Notizen auf seinem Poznote-Server:\n${list}\n]`;
+    const list = notes.slice(0, 40).map((n) => {
+      const ex = (n.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      return `- „${n.heading}" (#${n.id})${ex ? ': ' + ex : ''}`;
+    }).join('\n');
+    return `\n\n[Kontext: Die letzten Notizen des Nutzers auf Poznote:\n${list}\n]`;
   };
 
   const ask = async (text: string) => {
