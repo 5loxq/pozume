@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Pozume Icon: Monogramm P mit Feder (Konzept C) -->
+  <rect width="1024" height="1024" fill="#4338ca"/>
+  <text x="512" y="690" font-family="Helvetica, Arial, sans-serif" font-weight="bold"
+        font-size="700" fill="#f6f2e8" text-anchor="middle">P</text>
+  <g transform="translate(680,430) rotate(35) scale(0.62)">
+    <path d="M 10,320
+             C -190,180 -160,-100 -95,-240
+             C -75,-300 -60,-330 -40,-330
+             C 0,-300 20,-220 45,-100
+             C 70,60 60,220 10,320 Z"
+          fill="#f6f2e8"/>
+    <line x1="20" y1="300" x2="-38" y2="-320" stroke="#4338ca" stroke-width="22" stroke-linecap="round"/>
+    <g stroke="#4338ca" stroke-width="11" stroke-linecap="round">
+      <line x1="-8" y1="-150" x2="-110" y2="-82"/>
+      <line x1="-8" y1="-50" x2="-94" y2="18"/>
+      <line x1="-8" y1="50" x2="-78" y2="118"/>
+      <line x1="-8" y1="150" x2="-62" y2="218"/>
+    </g>
+  </g>
+</svg>

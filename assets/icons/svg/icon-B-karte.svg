@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Pozume Icon: Notizkarte mit Petrol-Feder (Konzept B) -->
+  <rect width="1024" height="1024" fill="#4f46e5"/>
+  <rect x="192" y="250" width="640" height="520" rx="70" fill="#f6f2e8"/>
+  <rect x="280" y="370" width="430" height="30" rx="15" fill="#c9cfdd"/>
+  <rect x="280" y="485" width="500" height="30" rx="15" fill="#c9cfdd"/>
+  <rect x="280" y="600" width="350" height="30" rx="15" fill="#c9cfdd"/>
+  <g transform="translate(720,560) rotate(-35) scale(0.7)">
+    <path d="M 10,320
+             C -190,180 -160,-100 -95,-240
+             C -75,-300 -60,-330 -40,-330
+             C 0,-300 20,-220 45,-100
+             C 70,60 60,220 10,320 Z"
+          fill="#0f6b6b"/>
+    <line x1="20" y1="300" x2="-38" y2="-320" stroke="#f6f2e8" stroke-width="20" stroke-linecap="round"/>
+    <g stroke="#f6f2e8" stroke-width="10" stroke-linecap="round">
+      <line x1="-8" y1="-150" x2="-110" y2="-82"/>
+      <line x1="-8" y1="-50" x2="-94" y2="18"/>
+      <line x1="-8" y1="50" x2="-78" y2="118"/>
+      <line x1="-8" y1="150" x2="-62" y2="218"/>
+    </g>
+  </g>
+</svg>

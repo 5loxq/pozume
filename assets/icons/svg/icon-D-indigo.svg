@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Pozume Icon: Feder-Emblem, Indigo (Konzept B/D) -->
+  <rect width="1024" height="1024" fill="#f6f2e8"/>
+  <circle cx="512" cy="512" r="360" fill="#4f46e5"/>
+  <!-- Feder: Bart links breit, Fahne rechts schmal -->
+  <g transform="translate(542,492) rotate(18)">
+    <path d="M 10,320
+             C -190,180 -160,-100 -95,-240
+             C -75,-300 -60,-330 -40,-330
+             C 0,-300 20,-220 45,-100
+             C 70,60 60,220 10,320 Z"
+          fill="#f6f2e8"/>
+    <!-- Kiel -->
+    <line x1="20" y1="300" x2="-38" y2="-320" stroke="#4f46e5" stroke-width="14" stroke-linecap="round"/>
+    <!-- Bart-Adern -->
+    <g stroke="#4f46e5" stroke-width="7" stroke-linecap="round">
+      <line x1="-8" y1="-150" x2="-110" y2="-82"/>
+      <line x1="-8" y1="-50" x2="-94" y2="18"/>
+      <line x1="-8" y1="50" x2="-78" y2="118"/>
+      <line x1="-8" y1="150" x2="-62" y2="218"/>
+    </g>
+  </g>
+</svg>
