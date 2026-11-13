@@ -5,6 +5,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import NotesListScreen from './src/screens/NotesListScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
 import FoldersScreen from './src/screens/FoldersScreen';
+import TrashScreen from './src/screens/TrashScreen';
 import LockScreen from './src/screens/LockScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock } from './src/api/store';
@@ -14,7 +15,8 @@ type Route =
   | { name: 'list' }
   | { name: 'editor'; note: Note | null }
   | { name: 'folders' }
-  | { name: 'folderNotes'; folderId: number; folderName: string };
+  | { name: 'folderNotes'; folderId: number; folderName: string }
+  | { name: 'trash' };
 
 export default function App() {
   const [client, setClient] = useState<PoznoteClient | null>(null);
@@ -88,6 +90,15 @@ export default function App() {
     );
   }
 
+  if (route.name === 'trash') {
+    return (
+      <>
+        <StatusBar style="dark" />
+        <TrashScreen client={client} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
   if (route.name === 'folders') {
     return (
       <>
@@ -120,7 +131,8 @@ export default function App() {
     <>
       <StatusBar style="dark" />
       <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
-        onOpenFolders={() => setRoute({ name: 'folders' })} />
+        onOpenFolders={() => setRoute({ name: 'folders' })}
+        onOpenTrash={() => setRoute({ name: 'trash' })} />
     </>
   );
 }

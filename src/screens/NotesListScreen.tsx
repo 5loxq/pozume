@@ -8,6 +8,7 @@ import { colors, spacing, radius, type, shadow } from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
+import { readCachedNotes, cacheNotes } from '../api/cache';
 
 interface Props {
   client: PoznoteClient;
@@ -17,9 +18,10 @@ interface Props {
   title?: string;
   onBack?: () => void;
   onOpenFolders?: () => void;
+  onOpenTrash?: () => void;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -34,13 +36,29 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
     try {
       const res = await client.listNotes(folderId != null ? { folder_id: folderId } : {});
       setNotes(res.notes ?? []);
+      cacheNotes(res.notes ?? []).catch(() => {});
     } catch (e: any) {
-      setError(e?.message ?? String(e));
+      // Offline: Cache zeigen statt harter Fehler
+      const cached = await readCachedNotes<Note[]>();
+      if (cached && cached.length > 0) {
+        setNotes(cached);
+      } else {
+        setError(e?.message ?? String(e));
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [client]);
+  }, [client, folderId]);
+
+  // Boot: sofort Cache zeigen, dann live aktualisieren
+  useEffect(() => {
+    if (folderId == null) {
+      readCachedNotes<Note[]>().then((cached) => {
+        if (cached && cached.length > 0) setNotes(cached);
+      });
+    }
+  }, [folderId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -66,11 +84,18 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
           </TouchableOpacity>
         ) : null}
         <Text style={[styles.greeting, styles.greetingFlex]}>{title ?? t('list.greeting')}</Text>
-        {onOpenFolders ? (
-          <TouchableOpacity style={styles.folderBtn} onPress={onOpenFolders}>
-            <Text style={styles.folderBtnText}>📁</Text>
-          </TouchableOpacity>
-        ) : null}
+        <View style={styles.headerBtns}>
+          {onOpenFolders ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenFolders}>
+              <Text style={styles.folderBtnText}>📁</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenTrash ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenTrash}>
+              <Text style={styles.folderBtnText}>🗑</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
       <View style={styles.searchWrap}>
         <TextInput
@@ -158,6 +183,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
   greetingFlex: { flex: 1, marginBottom: 0 },
   backBtn: { fontSize: 28, color: colors.text, marginRight: spacing.md },
+  headerBtns: { flexDirection: 'row', gap: spacing.sm },
   folderBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', ...shadow },
   folderBtnText: { fontSize: 19 },
   greeting: { ...type.title, marginBottom: spacing.lg },

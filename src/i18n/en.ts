@@ -44,4 +44,13 @@ export const en: Record<TranslationKey, string> = {
   'lock.enabled': 'App Lock on',
   'lock.disabled': 'App Lock off',
   'settings.security': 'Security',
+  'nav.trash': 'Trash',
+  'trash.title': 'Trash',
+  'trash.empty': 'The trash is empty',
+  'trash.restore': 'Restore',
+  'trash.deleteForever': 'Delete forever',
+  'trash.deleteForeverTitle': 'Delete forever?',
+  'trash.deleteForeverText': 'This note cannot be restored.',
+  'trash.restored': 'Restored',
+  'list.trashBtn': 'Open trash',
 };

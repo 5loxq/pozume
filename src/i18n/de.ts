@@ -43,5 +43,14 @@ export const de = {
   'lock.enabled': 'App-Lock aktiv',
   'lock.disabled': 'App-Lock aus',
   'settings.security': 'Sicherheit',
+  'nav.trash': 'Papierkorb',
+  'trash.title': 'Papierkorb',
+  'trash.empty': 'Der Papierkorb ist leer',
+  'trash.restore': 'Wiederherstellen',
+  'trash.deleteForever': 'Endgültig löschen',
+  'trash.deleteForeverTitle': 'Endgültig löschen?',
+  'trash.deleteForeverText': 'Diese Notiz lässt sich nicht wiederherstellen.',
+  'trash.restored': 'Wiederhergestellt',
+  'list.trashBtn': 'Papierkorb öffnen',
 } as const;
 export type TranslationKey = keyof typeof de;

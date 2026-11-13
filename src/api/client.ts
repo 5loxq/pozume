@@ -78,6 +78,19 @@ export class PoznoteClient {
     return this.req<{ success: boolean }>(`/notes/${id}`, { method: 'DELETE' });
   }
 
+  // --- Trash ---
+  listTrash() {
+    return this.req<{ notes: Note[] }>('/trash');
+  }
+
+  restoreNote(id: number) {
+    return this.req<{ success: boolean }>(`/notes/${id}/restore`, { method: 'POST' });
+  }
+
+  deleteFromTrashForever(id: number) {
+    return this.req<{ success: boolean }>(`/trash/${id}`, { method: 'DELETE' });
+  }
+
   // --- Folders ---
   listFolders() {
     return this.req<{ folders: unknown[] }>('/folders');
