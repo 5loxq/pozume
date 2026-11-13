@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { colors, spacing, radius, type, shadow, tagColors } from '../theme';
+import { usePalette, spacing, radius, type, shadow, tagColors } from '../theme';
+import { useColorScheme } from 'react-native';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
 import * as Haptics from 'expo-haptics';
 import type { Note } from '../api';
@@ -13,6 +14,8 @@ interface Props {
 }
 
 export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
+  const colors = usePalette();
+  const isDark = useColorScheme() === 'dark';
   const tags = parseTags(note.tags);
   return (
     <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(note); }}>
@@ -25,7 +28,7 @@ export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
       ) : null}
       <View style={styles.footerRow}>
         {tags.slice(0, 3).map((tag) => {
-          const c = tagColors(tag);
+          const c = tagColors(tag, isDark);
           return (
             <TouchableOpacity key={tag} activeOpacity={0.7}
               onPress={onTagPress ? () => onTagPress(tag) : undefined}>

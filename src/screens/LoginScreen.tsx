@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow, shadowSoft, primaryButton } from '../theme';
+import { usePalette, spacing, radius, type, shadow, shadowSoft, primaryButton} from '../theme';
 import { t } from '../i18n';
 import { PoznoteClient } from '../api';
 import { saveServer } from '../api/store';
 
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
+  const colors = usePalette();
   const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

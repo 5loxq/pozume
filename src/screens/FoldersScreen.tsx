@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow } from '../theme';
+import { usePalette, spacing, radius, type, shadow} from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 
@@ -15,6 +15,7 @@ interface Props {
 }
 
 export default function FoldersScreen({ client, onOpenFolder }: Props) {
+  const colors = usePalette();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');

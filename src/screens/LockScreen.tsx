@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { colors, spacing, type } from '../theme';
+import { usePalette, spacing, type} from '../theme';
 import { t } from '../i18n';
 
 interface Props { onUnlocked: () => void }
 
 export default function LockScreen({ onUnlocked }: Props) {
+  const colors = usePalette();
   const [busy, setBusy] = useState(false);
 
   const authenticate = async () => {

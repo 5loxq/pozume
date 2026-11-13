@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow, primaryButton } from '../theme';
+import { usePalette, spacing, radius, type, shadow, primaryButton} from '../theme';
 import { t } from '../i18n';
 import { loadAiConfig, saveAiConfig, clearAiConfig, aiChat, type AiConfig } from '../api/ai';
 import type { PoznoteClient, Note } from '../api';
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export default function AiScreen({ client, notes, onBack }: Props) {
+  const colors = usePalette();
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);

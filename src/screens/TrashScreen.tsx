@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow } from '../theme';
+import { usePalette, spacing, radius, type, shadow} from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { formatRelativeDate, excerpt } from '../utils';
@@ -14,6 +14,7 @@ interface Props {
 }
 
 export default function TrashScreen({ client, onBack }: Props) {
+  const colors = usePalette();
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const locale = getLocale();

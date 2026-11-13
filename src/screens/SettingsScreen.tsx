@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, radius, type, shadow } from '../theme';
+import { usePalette, spacing, radius, type, shadow} from '../theme';
 import { t, Locale, getLocale, getLocaleMode, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer } from '../api/store';
@@ -17,6 +17,7 @@ interface Props {
 }
 
 export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onBack }: Props) {
+  const colors = usePalette();
   const [lockEnabled, setLockEnabled] = useState(false);
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const locale = getLocale();

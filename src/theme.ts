@@ -1,43 +1,52 @@
-import { Platform } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 
-export const colors = {
-  bg: '#f6f7fb',
-  surface: '#ffffff',
-  text: '#151a23',
-  textMuted: '#5b6472',
-  textFaint: '#9aa3b2',
-  border: '#e6e9f0',
-  primary: '#4f46e5',
-  primaryDark: '#4338ca',
-  primarySoft: '#eef2ff',
-  accent: '#0ea5e9',
-  danger: '#dc2626',
-  dangerSoft: '#fef2f2',
-  star: '#f59e0b',
-  success: '#16a34a',
+export interface Palette {
+  bg: string; surface: string; text: string; textMuted: string; textFaint: string;
+  border: string; primary: string; primaryDark: string; primarySoft: string;
+  accent: string; danger: string; dangerSoft: string; star: string; success: string;
+}
+
+const light: Palette = {
+  bg: '#f6f7fb', surface: '#ffffff', text: '#151a23', textMuted: '#5b6472',
+  textFaint: '#9aa3b2', border: '#e6e9f0', primary: '#4f46e5', primaryDark: '#4338ca',
+  primarySoft: '#eef2ff', accent: '#0ea5e9', danger: '#dc2626', dangerSoft: '#fef2f2',
+  star: '#f59e0b', success: '#16a34a',
 };
 
-/** Tag-Farben: deterministisch aus Tag-Name (weiche Pastell-Paare) */
-const TAG_PALETTE: [string, string][] = [
-  ['#eef2ff', '#4f46e5'], // indigo
-  ['#ecfeff', '#0891b2'], // cyan
-  ['#fef3c7', '#b45309'], // amber
-  ['#fce7f3', '#be185d'], // pink
-  ['#dcfce7', '#15803d'], // green
-  ['#f3e8ff', '#7e22ce'], // purple
-  ['#ffedd5', '#c2410c'], // orange
-  ['#e0f2fe', '#0369a1'], // sky
+const dark: Palette = {
+  bg: '#0f1117', surface: '#1a1d26', text: '#e8eaf0', textMuted: '#9aa3b2',
+  textFaint: '#5b6472', border: '#2a2e3a', primary: '#818cf8', primaryDark: '#6366f1',
+  primarySoft: '#1e2135', accent: '#38bdf8', danger: '#f87171', dangerSoft: '#2a1518',
+  star: '#fbbf24', success: '#4ade80',
+};
+
+export function usePalette(): Palette {
+  const scheme = useColorScheme();
+  return scheme === 'dark' ? dark : light;
+}
+
+export const colors = light;
+
+const TAG_PALETTE_LIGHT: [string, string][] = [
+  ['#eef2ff', '#4f46e5'], ['#ecfeff', '#0891b2'], ['#fef3c7', '#b45309'],
+  ['#fce7f3', '#be185d'], ['#dcfce7', '#15803d'], ['#f3e8ff', '#7e22ce'],
+  ['#ffedd5', '#c2410c'], ['#e0f2fe', '#0369a1'],
+];
+const TAG_PALETTE_DARK: [string, string][] = [
+  ['#232647', '#a5b4fc'], ['#12333a', '#67e8f9'], ['#3a2e12', '#fcd34d'],
+  ['#3a1a2a', '#f9a8d4'], ['#15301e', '#86efac'], ['#2e1d47', '#c4b5fd'],
+  ['#3a2210', '#fdba74'], ['#12304d', '#7dd3fc'],
 ];
 
-export function tagColors(tag: string): { bg: string; fg: string } {
+export function tagColors(tag: string, dark?: boolean): { bg: string; fg: string } {
   let hash = 0;
   for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
-  const [bg, fg] = TAG_PALETTE[hash % TAG_PALETTE.length];
+  const pal = dark ? TAG_PALETTE_DARK : TAG_PALETTE_LIGHT;
+  const [bg, fg] = pal[hash % pal.length];
   return { bg, fg };
 }
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
-
 export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
 
 export const type = {
@@ -58,7 +67,6 @@ export const shadowSoft = Platform.select({
   android: { elevation: 1 },
 });
 
-/** Primäre Aktion */
 export const primaryButton = {
   backgroundColor: colors.primary,
   borderRadius: radius.pill,

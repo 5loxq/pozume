@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors, spacing, type } from '../theme';
+import { usePalette, spacing, type} from '../theme';
 
 /** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes */
 export default function MarkdownView({ content }: { content: string }) {
+  const colors = usePalette();
   const lines = content.split('\n');
   const out: React.ReactNode[] = [];
 
