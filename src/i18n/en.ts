@@ -57,4 +57,8 @@ export const en: Record<TranslationKey, string> = {
   'list.countNotes': '{n} notes',
   'list.countNote': '1 note',
   'list.searchEmpty': 'Nothing found for “{q}”',
+  'editor.moveFolder': 'Move to folder',
+  'editor.noFolder': 'No folder',
+  'editor.movedTo': 'Moved',
+  'common.done': 'Done',
 };

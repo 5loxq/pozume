@@ -56,5 +56,9 @@ export const de = {
   'list.countNotes': '{n} Notizen',
   'list.countNote': '1 Notiz',
   'list.searchEmpty': 'Nichts gefunden für „{q}“',
+  'editor.moveFolder': 'In Ordner verschieben',
+  'editor.noFolder': 'Kein Ordner',
+  'editor.movedTo': 'Verschoben',
+  'common.done': 'Fertig',
 } as const;
 export type TranslationKey = keyof typeof de;

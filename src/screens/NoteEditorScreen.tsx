@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import FolderPickerSheet from '../components/FolderPickerSheet';
 import { colors, spacing, radius, type } from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
@@ -79,6 +80,20 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   };
 
   const isFavorite = !!(note?.favorite);
+  const [showPicker, setShowPicker] = useState(false);
+  const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
+
+  const moveToFolder = async (targetId: number | null) => {
+    setShowPicker(false);
+    if (noteId == null) return;
+    try {
+      await client.updateNote(noteId, { folder_id: targetId });
+      setFolderId(targetId);
+      onSaved({ ...(note as Note), folder_id: targetId });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
   const toggleFavorite = async () => {
     if (noteId == null) return;
     try {
@@ -103,6 +118,9 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
         {!isNew && (
           <View style={styles.actions}>
+            <TouchableOpacity onPress={() => setShowPicker(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.folderIcon}>📁</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={toggleFavorite}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -140,6 +158,13 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           autoCapitalize="none"
         />
       </ScrollView>
+      <FolderPickerSheet
+        visible={showPicker}
+        client={client}
+        currentFolderId={folderId}
+        onSelect={moveToFolder}
+        onClose={() => setShowPicker(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -155,6 +180,7 @@ const styles = StyleSheet.create({
   status: { ...type.muted, flex: 1, textAlign: 'center' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 18, width: 90, justifyContent: 'flex-end' },
   starBtn: { fontSize: 22, color: colors.textFaint },
+  folderIcon: { fontSize: 20 },
   starActive: { color: colors.star },
   delete: { fontSize: 20 },
   content: { padding: spacing.lg, paddingBottom: 60 },
