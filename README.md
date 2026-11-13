@@ -65,4 +65,4 @@ src/
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE) (bilingual: English & Deutsch). Copyright 5loxq.
