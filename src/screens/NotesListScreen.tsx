@@ -20,12 +20,13 @@ interface Props {
   onOpenFolders?: () => void;
   onOpenTrash?: () => void;
   onOpenSettings?: () => void;
+  onOpenAi?: () => void;
   tag?: string;
   onBackFromTag?: () => void;
   onTagPress?: (tag: string) => void;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, tag, onBackFromTag, onTagPress }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, tag, onBackFromTag, onTagPress }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -116,6 +117,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
           {onOpenTrash ? (
             <TouchableOpacity style={styles.folderBtn} onPress={onOpenTrash}>
               <Text style={styles.folderBtnText}>🗑</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenAi ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenAi}>
+              <Text style={styles.folderBtnText}>✨</Text>
             </TouchableOpacity>
           ) : null}
           {onOpenSettings ? (
