@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow,
+import { usePalette, spacing, radius, typeFor, shadow,
   Palette,
 } from '../theme';
 import { t, getLocale } from '../i18n';
@@ -17,13 +17,15 @@ interface Props {
 
 export default function TrashScreen({ client, onBack }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const locale = getLocale();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     try {
       const res = await client.listTrash();
       setNotes(res.notes ?? []);
@@ -31,6 +33,7 @@ export default function TrashScreen({ client, onBack }: Props) {
       setNotes([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [client]);
 
@@ -62,6 +65,24 @@ export default function TrashScreen({ client, onBack }: Props) {
     ]);
   };
 
+  const emptyAll = () => {
+    if (notes.length === 0) return;
+    Alert.alert(t('trash.emptyAllTitle'), t('trash.emptyAllText'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('trash.emptyAll'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await client.emptyTrash();
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+          load();
+        },
+      },
+    ]);
+  };
+
   const renderItem = ({ item }: { item: Note }) => (
     <View style={[styles.row, shadow]}>
       <View style={styles.rowText}>
@@ -85,7 +106,13 @@ export default function TrashScreen({ client, onBack }: Props) {
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>{t('trash.title')}</Text>
-        <View style={{ width: 40 }} />
+        {notes.length > 0 ? (
+          <TouchableOpacity onPress={emptyAll} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.emptyAllIcon}>🗑</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
       </View>
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
@@ -95,6 +122,10 @@ export default function TrashScreen({ client, onBack }: Props) {
           keyExtractor={(n) => String(n.id)}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load({ silent: true }); }} />
+          }
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={styles.emptyEmoji}>🗑</Text>
@@ -107,7 +138,7 @@ export default function TrashScreen({ client, onBack }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row', alignItems: 'center',
@@ -131,6 +162,7 @@ const getStyles = (colors: Palette) => StyleSheet.create({
   },
   restoreText: { color: colors.primary, fontWeight: '600', fontSize: 13 },
   foreverText: { color: colors.danger, fontSize: 18 },
+  emptyAllIcon: { fontSize: 20, color: colors.danger },
   center: { alignItems: 'center', paddingVertical: 80 },
   emptyEmoji: { fontSize: 44, marginBottom: spacing.md },
   emptyText: { ...type.muted },

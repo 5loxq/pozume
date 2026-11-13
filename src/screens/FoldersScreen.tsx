@@ -1,58 +1,92 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow,
+import { usePalette, spacing, radius, typeFor, shadow,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
+import { readCachedFolders, cacheFolders } from '../api/cache';
 
-interface Folder { id: number; name: string; notes_count?: number }
+interface Folder { id: number; name: string; notes_count?: number; workspace?: string }
 
 interface Props {
   client: PoznoteClient;
   onOpenFolder: (folder: Folder) => void;
+  onBack: () => void;
 }
 
-export default function FoldersScreen({ client, onOpenFolder }: Props) {
+export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [newName, setNewName] = useState('');
+  const [firstWorkspace, setFirstWorkspace] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setLoading(true);
     try {
-      const res = await client.listFolders();
-      setFolders((res.folders ?? []) as Folder[]);
+      // Ordner je Workspace laden und zusammenführen — GET /folders liefert sonst nur den ersten
+      const wsRes = await client.listWorkspaces().catch(() => null);
+      const workspaces = (wsRes?.workspaces ?? []).map((w) => w.name);
+      if (workspaces.length > 0) setFirstWorkspace(workspaces[0]);
+      const lists = await Promise.all(
+        (workspaces.length > 0 ? workspaces : [undefined]).map((ws) =>
+          client.listFolders(ws)
+            .then((res) => ((res.folders ?? []) as Folder[]).map((f) => ({ ...f, workspace: ws })))
+            .catch(() => [] as Folder[]),
+        ),
+      );
+      const list = lists.flat();
+      setFolders(list);
+      cacheFolders(list).catch(() => {});
     } catch (e) {
-      // still zeigen was da ist
+      // Offline: letzten bekannten Stand zeigen
+      const cached = await readCachedFolders<Folder[]>();
+      if (cached && cached.length > 0) setFolders(cached);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [client]);
+
+  // Boot: Cache sofort zeigen, dann live aktualisieren
+  useEffect(() => {
+    readCachedFolders<Folder[]>().then((cached) => {
+      if (cached && cached.length > 0) setFolders(cached);
+    });
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const createFolder = async () => {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || creating) return;
+    setCreating(true);
     try {
-      await client.createFolder(name, 'Arbeit');
+      await client.createFolder(name, firstWorkspace ?? undefined);
       setNewName('');
-      load();
+      await load();
     } catch (e: any) {
       Alert.alert(t('common.error'), e?.message ?? String(e));
+    } finally {
+      setCreating(false);
     }
   };
 
   const renderFolder = ({ item }: { item: Folder }) => (
     <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)}>
       <Text style={styles.icon}>📁</Text>
-      <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+      <View style={styles.nameWrap}>
+        <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+        {item.workspace ? <Text style={styles.wsLabel} numberOfLines={1}>{item.workspace}</Text> : null}
+      </View>
       {item.notes_count != null && <Text style={styles.count}>{item.notes_count}</Text>}
       <Text style={styles.chevron}>›</Text>
     </TouchableOpacity>
@@ -61,7 +95,13 @@ export default function FoldersScreen({ client, onOpenFolder }: Props) {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t('nav.folders')}</Text>
+        <View style={styles.titleRow}>
+          <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.back}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>{t('nav.folders')}</Text>
+          <View style={{ width: 40 }} />
+        </View>
         <View style={styles.newRow}>
           <TextInput
             style={styles.newInput}
@@ -72,8 +112,8 @@ export default function FoldersScreen({ client, onOpenFolder }: Props) {
             onSubmitEditing={createFolder}
             returnKeyType="done"
           />
-          <TouchableOpacity style={styles.addBtn} onPress={createFolder}>
-            <Text style={styles.addBtnText}>＋</Text>
+          <TouchableOpacity style={[styles.addBtn, creating && { opacity: 0.6 }]} onPress={createFolder} disabled={creating}>
+            {creating ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addBtnText}>＋</Text>}
           </TouchableOpacity>
         </View>
       </View>
@@ -85,6 +125,10 @@ export default function FoldersScreen({ client, onOpenFolder }: Props) {
           keyExtractor={(f) => String(f.id)}
           renderItem={renderFolder}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load({ silent: true }); }} />
+          }
           ListEmptyComponent={
             <View style={styles.center}>
               <Text style={styles.empty}>🗂</Text>
@@ -97,10 +141,12 @@ export default function FoldersScreen({ client, onOpenFolder }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { padding: spacing.lg },
-  title: { ...type.title, marginBottom: spacing.lg },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.lg },
+  back: { fontSize: 28, color: colors.text, width: 40 },
+  title: { ...type.title, fontSize: 24, flex: 1, textAlign: 'center' },
   newRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   newInput: {
     flex: 1, backgroundColor: colors.surface, borderRadius: radius.pill,
@@ -115,7 +161,9 @@ const getStyles = (colors: Palette) => StyleSheet.create({
     borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm,
   },
   icon: { fontSize: 20, marginRight: spacing.md },
-  name: { ...type.h2, flex: 1, fontSize: 16 },
+  nameWrap: { flex: 1 },
+  name: { ...type.h2, fontSize: 16 },
+  wsLabel: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
   count: { ...type.muted, marginRight: spacing.sm },
   chevron: { color: colors.textFaint, fontSize: 22 },
   center: { alignItems: 'center', paddingVertical: 60 },

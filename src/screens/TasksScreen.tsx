@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow,
+import { usePalette, spacing, radius, typeFor, shadow,
   Palette,
 } from '../theme';
 import { t, getLocale } from '../i18n';
@@ -16,24 +16,38 @@ interface Props {
 
 export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const locale = getLocale();
-  const [tasks, setTasks] = useState<(Task & { note?: Note })[]>([]);
+  const [tasks, setTasks] = useState<(Task & { note?: Note; serverTaskId?: number })[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await client.listNotes();
-      const all: (Task & { note?: Note })[] = [];
-      for (const n of res.notes ?? []) {
-        // Inhalt fehlt in Liste -> Details je Notiz mit Aufgaben nachladen (max 50)
-        const detail = await client.getNote(n.id).catch(() => null);
-        const content = detail?.note?.content ?? n.content ?? '';
+      // Server-Tasklisten (ein Request) und Markdown-Checkboxen (parallel, max 50) zusammenführen
+      const [taskRes, notesRes] = await Promise.all([
+        client.listTasks().catch(() => null),
+        client.listNotes().catch(() => null),
+      ]);
+      const all: (Task & { note?: Note; serverTaskId?: number })[] = [];
+      for (const n of taskRes?.notes ?? []) {
+        for (const task of n.tasks ?? []) {
+          all.push({
+            noteId: n.id, noteHeading: n.heading, text: task.text,
+            done: task.completed, lineIndex: -1, serverTaskId: task.id,
+            note: { id: n.id, heading: n.heading } as Note,
+          });
+        }
+      }
+      const list = (notesRes?.notes ?? []).filter((n) => n.type !== 'tasklist').slice(0, 50);
+      const details = await Promise.all(list.map((n) => client.getNote(n.id).catch(() => null)));
+      list.forEach((n, i) => {
+        const content = details[i]?.note?.content ?? n.content ?? '';
         for (const task of extractTasks(content, n.id, n.heading)) {
           all.push({ ...task, note: n });
         }
-      }
+      });
       all.sort((a, b) => Number(a.done) - Number(b.done));
       setTasks(all);
     } finally {
@@ -43,7 +57,12 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  const toggle = async (task: Task & { note?: Note }) => {
+  const toggle = async (task: Task & { note?: Note; serverTaskId?: number }) => {
+    if (task.serverTaskId != null) {
+      await client.updateTask(task.noteId, task.serverTaskId, { completed: !task.done }).catch(() => {});
+      load();
+      return;
+    }
     if (!task.note) return;
     const detail = await client.getNote(task.noteId).catch(() => null);
     if (!detail?.note?.content) return;
@@ -55,7 +74,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
     load();
   };
 
-  const renderItem = ({ item }: { item: Task & { note?: Note } }) => (
+  const renderItem = ({ item }: { item: Task & { note?: Note; serverTaskId?: number } }) => (
     <TouchableOpacity
       style={[styles.row, shadow]}
       activeOpacity={0.7}
@@ -102,7 +121,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, width: 40 },

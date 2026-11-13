@@ -3,8 +3,9 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow,
-  Palette,
+import Constants from 'expo-constants';
+import { usePalette, spacing, radius, typeFor, shadow,
+  Palette, loadThemeOverride, saveThemeOverride, getThemeMode, type ThemeMode,
 } from '../theme';
 import { t, Locale, getLocale, getLocaleMode, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
@@ -20,12 +21,20 @@ interface Props {
 
 export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onBack }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [lockEnabled, setLockEnabled] = useState(false);
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
+  const [themeMode, setThemeMode] = useState<ThemeMode>('auto');
   const locale = getLocale();
 
   useEffect(() => { loadLocaleOverride().then(setLocaleMode); }, []);
+  useEffect(() => { setThemeMode(getThemeMode()); }, []);
+
+  const setTheme = async (mode: ThemeMode) => {
+    setThemeMode(mode);
+    await saveThemeOverride(mode);
+  };
 
   const setLang = async (mode: LocaleMode) => {
     setLocaleMode(mode);
@@ -87,6 +96,22 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.section}>{t('settings.appearance')}</Text>
+        <View style={[styles.card, shadow]}>
+          <TouchableOpacity style={styles.row} onPress={() => setTheme('auto')}>
+            <Text style={[styles.rowText, themeMode === 'auto' && styles.active]}>🌗 {t('settings.themeAuto')}</Text>
+            {themeMode === 'auto' ? <Text style={styles.check}>✓</Text> : null}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setTheme('light')}>
+            <Text style={[styles.rowText, themeMode === 'light' && styles.active]}>☀️ {t('settings.themeLight')}</Text>
+            {themeMode === 'light' ? <Text style={styles.check}>✓</Text> : null}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setTheme('dark')}>
+            <Text style={[styles.rowText, themeMode === 'dark' && styles.active]}>🌙 {t('settings.themeDark')}</Text>
+            {themeMode === 'dark' ? <Text style={styles.check}>✓</Text> : null}
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.section}>{t('settings.server')}</Text>
         <View style={[styles.card, shadow]}>
           <View style={[styles.row, styles.rowLast]}>
@@ -98,13 +123,13 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
           <Text style={styles.logoutText}>↩ {t('settings.logout')}</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>{t('settings.version')} · 🪶</Text>
+        <Text style={styles.version}>Pozume v{Constants.expoConfig?.version ?? '?'} · 🪶</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, color: colors.text, width: 40 },

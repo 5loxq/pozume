@@ -5,11 +5,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Share } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { setReminder, removeReminder, getReminder } from '../api/reminders';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
-import { usePalette, spacing, radius, type, primaryButton,
+import DrawingEditor from '../components/DrawingEditor';
+import { usePalette, spacing, radius, typeFor, primaryButton,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -23,15 +26,28 @@ interface Props {
   onDeleted: (id: number) => void;
 }
 
+interface Attachment { id: string; filename: string; original_filename?: string; file_size?: number; file_type?: string }
+
+function base64FromBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 export default function NoteEditorScreen({ client, note, onClose, onSaved, onDeleted }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const isNew = note == null;
   const [heading, setHeading] = useState(note?.heading ?? '');
   const [content, setContent] = useState(note?.content ?? '');
   const [tags, setTags] = useState(note?.tags ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+  const noteIdRef = useRef<number | null>(note?.id ?? null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ heading, content, tags });
   latest.current = { heading, content, tags };
@@ -40,18 +56,18 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     setSaveState('saving');
     const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
     try {
-      if (noteId == null) {
+      if (noteIdRef.current == null) {
         const res = await client.createNote({
           heading: body.heading || 'Ohne Titel',
           content: body.content,
           type: 'markdown',
           tags: body.tags,
-          workspace: 'Arbeit',
         });
+        noteIdRef.current = res.note.id;
         setNoteId(res.note.id);
         onSaved(res.note);
       } else {
-        await client.updateNote(noteId, body);
+        await client.updateNote(noteIdRef.current, body);
         onSaved({ ...(note as Note), ...body, updated_at: new Date().toISOString() });
       }
       setSaveState('saved');
@@ -69,7 +85,15 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     saveTimer.current = setTimeout(persist, 1200);
   };
 
-  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+  // Beim Schließen: ausstehenden Autosave nicht verwerfen, sondern speichern
+  const persistRef = useRef(persist);
+  persistRef.current = persist;
+  useEffect(() => () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      persistRef.current();
+    }
+  }, []);
 
   const confirmDelete = () => {
     if (noteId == null) return onClose();
@@ -94,6 +118,11 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   const [locked, setLocked] = useState(false);
   const [pinPrompt, setPinPrompt] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  const [pinned, setPinned] = useState(!!note?.pinned);
+  const [shared, setShared] = useState(false);
+  const [sharedUrl, setSharedUrl] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const isExcalidraw = note?.type === 'excalidraw';
 
   const isFavorite = !!(note?.favorite);
 
@@ -103,7 +132,35 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     isNoteLocked(note.id).then((v) => {
       if (v) { setLocked(true); setPinPrompt(true); }
     });
+    client.getShare(note.id)
+      .then((r) => { setShared(!!r.shared); setSharedUrl(r.url ?? null); })
+      .catch(() => {});
+    client.listAttachments(note.id)
+      .then((r) => setAttachments(r.attachments ?? []))
+      .catch(() => {});
   }, [note?.id]);
+
+  const openAttachment = async (att: Attachment) => {
+    if (noteId == null) return;
+    try {
+      const res = await fetch(`${client.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${att.id}`, {
+        headers: {
+          Authorization: 'Basic ' + btoa(`${client.cfg.username}:${client.cfg.password}`),
+          'X-User-ID': client.cfg.userId ?? '1',
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const fileName = att.original_filename || att.filename || 'anhang';
+      const path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
+      await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: att.file_type || 'application/octet-stream', dialogTitle: fileName });
+      }
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
 
   const tryUnlock = async () => {
     if (await verifyPin(pinInput)) {
@@ -135,6 +192,68 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     }
   };
   const [showPicker, setShowPicker] = useState(false);
+
+  const togglePin = async () => {
+    if (noteId == null) return;
+    try {
+      await client.setPinned(noteId, !pinned);
+      setPinned(!pinned);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('📌', !pinned ? t('editor.pinned') : t('editor.unpinned'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const duplicate = async () => {
+    if (noteId == null) return;
+    try {
+      await client.duplicateNote(noteId);
+      Alert.alert('🪶', t('editor.duplicated'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const revokeShare = () => {
+    if (noteId == null) return;
+    Alert.alert(t('editor.shareRevoke'), t('editor.shareRevokeConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await client.revokeShare(noteId);
+            setShared(false); setSharedUrl(null);
+            Alert.alert('🪶', t('editor.shareRevoked'));
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
+
+  const shareLink = async () => {
+    if (noteId == null) return;
+    try {
+      if (shared) {
+        Alert.alert('🔗 ' + t('editor.shareActive'), sharedUrl ?? '', [
+          { text: t('common.cancel'), style: 'cancel' },
+          { text: t('share.noteTitle'), onPress: () => { if (sharedUrl) Share.share({ message: sharedUrl }).catch(() => {}); } },
+          { text: t('editor.shareRevoke'), style: 'destructive', onPress: revokeShare },
+        ]);
+        return;
+      }
+      const res = await client.shareNote(noteId);
+      const url = res.url ?? res.share_url ?? (res.token ? `${client.cfg.baseUrl}/${res.token}` : null);
+      if (!url) throw new Error('no url');
+      setShared(true); setSharedUrl(url);
+      Share.share({ title: latest.current.heading || 'Pozume', message: url }).catch(() => {});
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
 
   const promptReminder = () => {
     if (noteId == null) return;
@@ -204,6 +323,11 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   if (locked && pinPrompt) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.pinTopBar}>
+          <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.back}>←</Text>
+          </TouchableOpacity>
+        </View>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl }}>
           <Text style={{ fontSize: 52, marginBottom: spacing.lg }}>🔒</Text>
           <Text style={[type.h2, { marginBottom: spacing.lg }]}>{t('lock.noteLocked')}</Text>
@@ -234,9 +358,6 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
         {!isNew && (
           <View style={styles.actions}>
-            <TouchableOpacity onPress={() => setShowPicker(true)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.folderIcon}>📁</Text>
-            </TouchableOpacity>
             <TouchableOpacity onPress={shareNote} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.folderIcon}>↗</Text>
             </TouchableOpacity>
@@ -257,6 +378,26 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           </View>
         )}
       </View>
+      {!isNew && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.actionRow} contentContainerStyle={styles.actionRowContent}>
+          <TouchableOpacity style={styles.actionChip} onPress={() => setShowPicker(true)}>
+            <Text style={styles.actionChipIcon}>📁</Text>
+            <Text style={styles.actionChipText}>{t('editor.moveFolder')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionChip} onPress={togglePin}>
+            <Text style={styles.actionChipIcon}>{pinned ? '📌' : '📍'}</Text>
+            <Text style={styles.actionChipText}>{pinned ? t('editor.unpin') : t('editor.pin')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionChip} onPress={duplicate}>
+            <Text style={styles.actionChipIcon}>⧉</Text>
+            <Text style={styles.actionChipText}>{t('editor.duplicate')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionChip} onPress={shareLink}>
+            <Text style={styles.actionChipIcon}>{shared ? '🔗' : '⛓︎'}</Text>
+            <Text style={styles.actionChipText}>{shared ? t('editor.shareActive') : t('editor.shareLink')}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <TextInput
           style={styles.titleInput}
@@ -265,7 +406,12 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           value={heading}
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
         />
-        {preview ? (
+        {isExcalidraw ? (
+          <DrawingEditor
+            content={content}
+            onChange={(svg) => { setContent(svg); scheduleSave(); }}
+          />
+        ) : preview ? (
           <View style={styles.previewWrap}>
             <MarkdownView content={content} />
           </View>
@@ -288,11 +434,28 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           onChangeText={(v) => { setTags(v); scheduleSave(); }}
           autoCapitalize="none"
         />
-        <Text style={styles.meta}>
-          {content.trim()
-            ? `${t('editor.wordCount', { n: content.trim().split(/\s+/).length })} · ${t('editor.readingTime', { n: Math.max(1, Math.ceil(content.trim().split(/\s+/).length / 200)) })}`
-            : ''}
-        </Text>
+        {!isExcalidraw && (
+          <Text style={styles.meta}>
+            {content.trim()
+              ? `${t('editor.wordCount', { n: content.trim().split(/\s+/).length })} · ${t('editor.readingTime', { n: Math.max(1, Math.ceil(content.trim().split(/\s+/).length / 200)) })}`
+              : ''}
+          </Text>
+        )}
+        {attachments.length > 0 && (
+          <View style={styles.attachSection}>
+            <Text style={styles.attachTitle}>📎 {t('editor.attachments')} ({attachments.length})</Text>
+            <View style={styles.attachRow}>
+              {attachments.map((att) => (
+                <TouchableOpacity key={att.id} style={styles.attachChip} onPress={() => openAttachment(att)} activeOpacity={0.7}>
+                  <Text style={styles.attachName} numberOfLines={1}>{att.original_filename || att.filename}</Text>
+                  {att.file_size != null ? (
+                    <Text style={styles.attachSize}>{att.file_size >= 1048576 ? `${(att.file_size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(att.file_size / 1024))} KB`}</Text>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
       <FolderPickerSheet
         visible={showPicker}
@@ -305,16 +468,26 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
+  pinTopBar: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   topBar: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   back: { fontSize: 26, color: colors.text, width: 40 },
-  status: { ...type.muted, flex: 1, textAlign: 'center' },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, width: 130, justifyContent: 'flex-end' },
+  status: { ...type.muted, flex: 1, textAlign: 'center', flexShrink: 1 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'flex-end' },
+  actionRow: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border },
+  actionRowContent: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  actionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: colors.primarySoft, borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 7,
+  },
+  actionChipIcon: { fontSize: 14 },
+  actionChipText: { fontSize: 12, fontWeight: '600', color: colors.primary },
   starBtn: { fontSize: 22, color: colors.textFaint },
   folderIcon: { fontSize: 20 },
   starActive: { color: colors.star },
@@ -330,4 +503,14 @@ const getStyles = (colors: Palette) => StyleSheet.create({
     backgroundColor: colors.primarySoft, borderRadius: radius.pill,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
+  excPlaceholder: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: spacing.xl },
+  attachSection: { marginTop: spacing.lg },
+  attachTitle: { ...type.h2, fontSize: 14, marginBottom: spacing.sm },
+  attachRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  attachChip: {
+    backgroundColor: colors.primarySoft, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, maxWidth: '100%',
+  },
+  attachName: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  attachSize: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
 });

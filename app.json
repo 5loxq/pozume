@@ -29,7 +29,8 @@
         {
           "mode": "broadcast"
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }

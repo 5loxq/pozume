@@ -1,4 +1,31 @@
 import { Platform, useColorScheme } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+/** Manueller Theme-Override: auto | light | dark */
+export type ThemeMode = 'auto' | 'light' | 'dark';
+let themeOverride: ThemeMode | null = null;
+const themeListeners = new Set<() => void>();
+
+export async function loadThemeOverride(): Promise<ThemeMode> {
+  const raw = await AsyncStorage.getItem('pozume.theme');
+  themeOverride = (raw as ThemeMode) ?? 'auto';
+  return themeOverride;
+}
+
+export async function saveThemeOverride(mode: ThemeMode): Promise<void> {
+  themeOverride = mode;
+  await AsyncStorage.setItem('pozume.theme', mode);
+  themeListeners.forEach((fn) => fn());
+}
+
+export function onThemeChange(fn: () => void): () => void {
+  themeListeners.add(fn);
+  return () => themeListeners.delete(fn);
+}
+
+export function getThemeMode(): ThemeMode {
+  return themeOverride ?? 'auto';
+}
 
 export interface Palette {
   bg: string; surface: string; text: string; textMuted: string; textFaint: string;
@@ -21,7 +48,9 @@ const dark: Palette = {
 };
 
 export function usePalette(): Palette {
-  const scheme = useColorScheme();
+  const system = useColorScheme();
+  const mode = getThemeMode();
+  const scheme = mode === 'auto' ? system : mode;
   return scheme === 'dark' ? dark : light;
 }
 
@@ -49,13 +78,18 @@ export function tagColors(tag: string, dark?: boolean): { bg: string; fg: string
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
 
-export const type = {
-  title: { fontSize: 30, fontWeight: '800' as const, letterSpacing: -0.5, color: colors.text },
-  h2: { fontSize: 17, fontWeight: '700' as const, color: colors.text },
-  body: { fontSize: 15, color: colors.text, lineHeight: 22 },
-  muted: { fontSize: 13, color: colors.textMuted },
-  faint: () => ({ fontSize: 12, color: colors.textFaint }),
-};
+export function typeFor(p: Palette) {
+  return {
+    title: { fontSize: 30, fontWeight: '800' as const, letterSpacing: -0.5, color: p.text },
+    h2: { fontSize: 17, fontWeight: '700' as const, color: p.text },
+    body: { fontSize: 15, color: p.text, lineHeight: 22 },
+    muted: { fontSize: 13, color: p.textMuted },
+    faint: () => ({ fontSize: 12, color: p.textFaint }),
+  };
+}
+
+/** Light-Variante als Fallback (z.B. Boot-Screen vor dem ersten Render mit Palette) */
+export const type = typeFor(light);
 
 export const shadow = Platform.select({
   ios: { shadowColor: '#1a2340', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },

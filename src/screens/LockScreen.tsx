@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { usePalette, spacing, type,
+import { usePalette, spacing, typeFor,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -10,7 +10,8 @@ interface Props { onUnlocked: () => void }
 
 export default function LockScreen({ onUnlocked }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [busy, setBusy] = useState(false);
 
   const authenticate = async () => {
@@ -47,7 +48,7 @@ export default function LockScreen({ onUnlocked }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   owl: { fontSize: 64, marginBottom: spacing.lg },
   title: { ...type.h2, marginBottom: spacing.xl },

@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { usePalette, spacing, radius, type, shadow, tagColors,
+import { usePalette, spacing, radius, typeFor, shadow, tagColors,
   Palette,
 } from '../theme';
 import { useColorScheme } from 'react-native';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
+import { t } from '../i18n';
 import * as Haptics from 'expo-haptics';
 import type { Note } from '../api';
 
@@ -17,16 +18,20 @@ interface Props {
 
 export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const isDark = useColorScheme() === 'dark';
   const tags = parseTags(note.tags);
   return (
     <TouchableOpacity style={[styles.card, shadow]} activeOpacity={0.65} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(note); }}>
       <View style={styles.headerRow}>
+        {note.pinned ? <Text style={styles.pin}>📌</Text> : null}
         <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
         {note.favorite ? <Text style={styles.star}>★</Text> : null}
       </View>
-      {excerpt(note.content) ? (
+      {note.type === 'excalidraw' ? (
+        <Text style={styles.excerpt} numberOfLines={1}>🎨 {t('list.excalidraw')}</Text>
+      ) : excerpt(note.content) ? (
         <Text style={styles.excerpt} numberOfLines={2}>{excerpt(note.content)}</Text>
       ) : null}
       <View style={styles.footerRow}>
@@ -47,16 +52,17 @@ export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(21,26,35,0.04)',
+    borderColor: colors.border,
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  pin: { fontSize: 13, marginRight: spacing.sm, marginTop: 2 },
   title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
   star: { color: colors.star, fontSize: 18, marginLeft: spacing.sm },
   excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 20 },

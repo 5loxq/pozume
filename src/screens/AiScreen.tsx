@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadow, primaryButton,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -21,7 +21,8 @@ interface Props {
 
 export default function AiScreen({ client, notes, onBack }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -137,8 +138,8 @@ export default function AiScreen({ client, notes, onBack }: Props) {
             onChangeText={setInput}
             multiline
           />
-          <TouchableOpacity style={[styles.sendBtn, (busy || !input.trim()) && styles.sendDisabled]}
-            onPress={() => ask(input)} disabled={busy || !input.trim()}>
+          <TouchableOpacity style={[styles.sendBtn, (busy || !input.trim() || !cfg) && styles.sendDisabled]}
+            onPress={() => ask(input)} disabled={busy || !input.trim() || !cfg}>
             {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.sendText}>↑</Text>}
           </TouchableOpacity>
         </View>
@@ -146,6 +147,7 @@ export default function AiScreen({ client, notes, onBack }: Props) {
 
       <Modal visible={showConfig} transparent animationType="slide" onRequestClose={() => setShowConfig(false)}>
         <View style={styles.backdrop}>
+          <TouchableOpacity style={styles.backdropTouch} onPress={() => setShowConfig(false)} />
           <View style={[styles.sheet, shadow]}>
             <Text style={styles.sheetTitle}>{t('ai.settings')}</Text>
             <TextInput style={styles.cfgInput} placeholder={t('ai.baseUrl')}
@@ -159,6 +161,9 @@ export default function AiScreen({ client, notes, onBack }: Props) {
               value={fModel} onChangeText={setFModel} />
             <Text style={styles.hint}>{t('ai.hint')}</Text>
             <View style={styles.cfgBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowConfig(false)}>
+                <Text style={styles.cancelText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={styles.saveBtn} onPress={saveConfig}>
                 <Text style={styles.saveText}>{t('ai.save')}</Text>
               </TouchableOpacity>
@@ -175,7 +180,7 @@ export default function AiScreen({ client, notes, onBack }: Props) {
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, color: colors.text, width: 44 },
@@ -213,6 +218,7 @@ const getStyles = (colors: Palette) => StyleSheet.create({
   sendDisabled: { opacity: 0.4 },
   sendText: { color: '#fff', fontSize: 20, fontWeight: '700' },
   backdrop: { flex: 1, backgroundColor: 'rgba(21,26,35,0.4)', justifyContent: 'flex-end' },
+  backdropTouch: { flex: 1 },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
@@ -226,6 +232,11 @@ const getStyles = (colors: Palette) => StyleSheet.create({
   },
   hint: { ...type.faint(), lineHeight: 17, marginBottom: spacing.lg },
   cfgBtns: { flexDirection: 'row', gap: spacing.md },
+  cancelBtn: {
+    flex: 1, borderRadius: radius.pill, paddingVertical: 14, alignItems: 'center',
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
+  },
+  cancelText: { color: colors.textMuted, fontWeight: '700' },
   saveBtn: { ...primaryButton as object, flex: 1, paddingVertical: 14 },
   saveText: { color: '#fff', fontWeight: '700' },
   clearBtn: { width: 50, borderRadius: radius.md, backgroundColor: colors.dangerSoft, alignItems: 'center', justifyContent: 'center' },

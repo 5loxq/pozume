@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, shadowSoft, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadow, shadowSoft, primaryButton,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -10,7 +10,8 @@ import { saveServer } from '../api/store';
 
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -20,7 +21,8 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
   const connect = async () => {
     setBusy(true); setError(null);
     try {
-      const base = serverUrl.replace(/\/+$/, '');
+      let base = serverUrl.trim().replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
       const client = new PoznoteClient({ baseUrl: base, username, password });
       await client.listNotes();
       await saveServer({ baseUrl: base, username, password }).catch(() => {});
@@ -66,7 +68,7 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   hero: { alignItems: 'center', paddingTop: spacing.xxl, paddingBottom: spacing.xl },

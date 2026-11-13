@@ -4,7 +4,7 @@ import {
   StyleSheet, RefreshControl, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, shadowSoft, greetingForHour,
+import { usePalette, spacing, radius, typeFor, shadow, shadowSoft, greetingForHour,
   Palette,
 } from '../theme';
 import { t, getLocale } from '../i18n';
@@ -31,7 +31,8 @@ interface Props {
 
 export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, tag, onBackFromTag, onTagPress }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -80,12 +81,6 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
 
   useEffect(() => { load(); }, [load]);
 
-  // Beim Rueckkehr-Fokus (z.B. aus Editor) still aktualisieren
-  useEffect(() => {
-    const unsub = setTimeout(() => load({ silent: true }), 120);
-    return () => clearTimeout(unsub);
-  }, [load]);
-
   const visible = useMemo(() => {
     let out = notes;
     if (showFavorites) out = out.filter((n) => n.favorite);
@@ -102,7 +97,8 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
     } else {
       out.sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
     }
-    return out;
+    // Angepinnte Notizen immer nach oben (stabil, Sortierung bleibt innerhalb der Gruppen)
+    return [...out.filter((n) => n.pinned), ...out.filter((n) => !n.pinned)];
   }, [notes, search, showFavorites, sortBy, locale]);
 
   const renderHeader = () => (
@@ -156,6 +152,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
           onChangeText={setSearch}
           returnKeyType="search"
         />
+        {search.length > 0 ? (
+          <TouchableOpacity style={styles.searchClear} onPress={() => setSearch('')} hitSlop={{ left: 8, top: 8, bottom: 8, right: 8 }}>
+            <Text style={styles.searchClearText}>✕</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       <View style={styles.filterRow}>
         <TouchableOpacity
@@ -244,7 +245,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   listContent: { padding: spacing.lg, paddingBottom: 100 },
   header: { marginBottom: spacing.lg },
@@ -256,7 +257,9 @@ const getStyles = (colors: Palette) => StyleSheet.create({
   folderBtnText: { fontSize: 19 },
   greeting: { ...type.title, fontSize: 26 },
   countText: { ...type.faint(), marginTop: 2 },
-  searchWrap: { marginBottom: spacing.md },
+  searchWrap: { marginBottom: spacing.md, flexDirection: 'row', alignItems: 'center' },
+  searchClear: { position: 'absolute', right: spacing.md, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  searchClearText: { color: colors.textMuted, fontSize: 13, fontWeight: '700', marginTop: -1 },
   searchInput: {
     backgroundColor: colors.surface, borderRadius: radius.pill,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,

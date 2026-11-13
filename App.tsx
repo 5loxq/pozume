@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
 import NotesListScreen from './src/screens/NotesListScreen';
 import NoteEditorScreen from './src/screens/NoteEditorScreen';
@@ -13,7 +14,7 @@ import LockScreen from './src/screens/LockScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock } from './src/api/store';
 import { loadLocaleOverride, onLocaleChange } from './src/i18n';
-import { colors } from './src/theme';
+import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
   | { name: 'list' }
@@ -26,7 +27,8 @@ type Route =
   | { name: 'ai' }
   | { name: 'tasks' };
 
-export default function App() {
+function AppInner() {
+  const palette = usePalette();
   const [client, setClient] = useState<PoznoteClient | null>(null);
   const [booting, setBooting] = useState(true);
   const [locked, setLocked] = useState(false);
@@ -48,6 +50,7 @@ export default function App() {
           c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
         }
         await loadLocaleOverride();
+        await loadThemeOverride();
       } finally {
         setBooting(false);
       }
@@ -56,6 +59,9 @@ export default function App() {
 
   // Bei Sprachwechsel alles neu rendern
   useEffect(() => onLocaleChange(() => forceRender((n) => n + 1)), []);
+
+  // Bei Theme-Wechsel alles neu rendern
+  useEffect(() => onThemeChange(() => forceRender((n) => n + 1)), []);
 
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
@@ -76,8 +82,8 @@ export default function App() {
 
   if (booting) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg }}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.bg }}>
+        <ActivityIndicator size="large" color={palette.primary} />
       </View>
     );
   }
@@ -85,7 +91,7 @@ export default function App() {
   if (!client) {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <LoginScreen onConnected={onConnected} />
       </>
     );
@@ -94,7 +100,7 @@ export default function App() {
   if (locked) {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <LockScreen onUnlocked={() => setLocked(false)} />
       </>
     );
@@ -103,13 +109,15 @@ export default function App() {
   if (route.name === 'editor' && isWide) {
     return (
       <>
-        <StatusBar style="dark" />
-        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: colors.bg }}>
-          <View style={{ width: '42%', borderRightWidth: 1, borderRightColor: colors.border }}>
+        <StatusBar style="auto" />
+        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: palette.bg }}>
+          <View style={{ width: '42%', borderRightWidth: 1, borderRightColor: palette.border }}>
             <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
               onOpenFolders={() => setRoute({ name: 'folders' })}
               onOpenTrash={() => setRoute({ name: 'trash' })}
               onOpenSettings={() => setRoute({ name: 'settings' })}
+              onOpenAi={() => setRoute({ name: 'ai' })}
+              onOpenTasks={() => setRoute({ name: 'tasks' })}
               onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })} />
           </View>
           <View style={{ flex: 1 }}>
@@ -129,7 +137,7 @@ export default function App() {
   if (route.name === 'editor') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <NoteEditorScreen
           client={client}
           note={route.note}
@@ -144,7 +152,7 @@ export default function App() {
   if (route.name === 'tasks') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <TasksScreen client={client} onOpenNote={openNote} onBack={() => setRoute({ name: 'list' })} />
       </>
     );
@@ -153,7 +161,7 @@ export default function App() {
   if (route.name === 'ai') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <AiScreen client={client} notes={allNotes} onBack={() => setRoute({ name: 'list' })} />
       </>
     );
@@ -162,7 +170,7 @@ export default function App() {
   if (route.name === 'settings') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <SettingsScreen
           client={client}
           onLockChange={onLockToggle}
@@ -177,7 +185,7 @@ export default function App() {
   if (route.name === 'tagNotes') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <NotesListScreen
           client={client}
           tag={route.tag}
@@ -193,7 +201,7 @@ export default function App() {
   if (route.name === 'trash') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <TrashScreen client={client} onBack={() => setRoute({ name: 'list' })} />
       </>
     );
@@ -202,10 +210,11 @@ export default function App() {
   if (route.name === 'folders') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <FoldersScreen
           client={client}
           onOpenFolder={(f) => setRoute({ name: 'folderNotes', folderId: f.id, folderName: f.name })}
+          onBack={() => setRoute({ name: 'list' })}
         />
       </>
     );
@@ -214,7 +223,7 @@ export default function App() {
   if (route.name === 'folderNotes') {
     return (
       <>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <NotesListScreen
           client={client}
           folderId={route.folderId}
@@ -229,7 +238,7 @@ export default function App() {
 
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style="auto" />
       <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
         onOpenFolders={() => setRoute({ name: 'folders' })}
         onOpenTrash={() => setRoute({ name: 'trash' })}
@@ -238,5 +247,14 @@ export default function App() {
         onOpenAi={() => setRoute({ name: 'ai' })}
         onOpenTasks={() => setRoute({ name: 'tasks' })} />
     </>
+  );
+}
+
+/** SafeAreaProvider ist Pflicht, damit die SafeAreaView-Instanzen der Screens Insets liefern */
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, FlatList, ActivityIndicator } from 'react-native';
-import { usePalette, spacing, radius, type, shadow, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadow, primaryButton,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -18,7 +18,8 @@ interface Props {
 
 export default function FolderPickerSheet({ visible, client, currentFolderId, onSelect, onClose }: Props) {
   const colors = usePalette();
-  const styles = getStyles(colors);
+  const type = typeFor(colors);
+  const styles = getStyles(colors, type);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -71,7 +72,7 @@ export default function FolderPickerSheet({ visible, client, currentFolderId, on
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(21,26,35,0.4)', justifyContent: 'flex-end' },
   backdropTouch: { flex: 1 },
   sheet: {
