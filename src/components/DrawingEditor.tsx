@@ -6,7 +6,7 @@ import { usePalette, spacing, radius, typeFor, shadow,
 } from '../theme';
 import { t } from '../i18n';
 
-/** Zeichenelement im Editor-Modell */
+/** Zeichenelement im Editor-Modell (Koordinaten absolut, SVG-artig) */
 interface PathEl { id: string; type: 'path'; d: string; stroke: string; strokeWidth: number; fill: string }
 interface RectEl { id: string; type: 'rect'; x: number; y: number; w: number; h: number; stroke: string; strokeWidth: number; fill: string }
 interface EllipseEl { id: string; type: 'ellipse'; cx: number; cy: number; rx: number; ry: number; stroke: string; strokeWidth: number; fill: string }
@@ -20,27 +20,153 @@ const WIDTHS = [2, 4, 8];
 
 let elSeq = 0;
 const nextId = () => `e${++elSeq}`;
+const randSeed = () => Math.floor(Math.random() * 2000000000);
 
-/** SVG-Quelltext in Elemente + ViewBox zerlegen; unbekannte Teile roh erhalten */
-function parseSvg(content: string): { elements: DrawEl[]; raw: string[]; viewBox: [number, number] } {
-  const elements: DrawEl[] = [];
-  const raw: string[] = [];
+/** Excalidraw-Szenen-JSON erkennen */
+export function isExcalidrawContent(content?: string): boolean {
+  if (!content) return false;
+  const c = content.trimStart();
+  if (!c.startsWith('{')) return false;
+  try {
+    const p = JSON.parse(c);
+    return Array.isArray(p?.elements);
+  } catch { return false; }
+}
+
+/** Excalidraw-Szene aus dem HTML einer Poznote-Excalidraw-Notiz ziehen (verstecktes div) */
+export function extractExcalidrawScene(content?: string): string | null {
+  if (!content) return null;
+  const m = content.match(/<div class="excalidraw-data"[^>]*>([\s\S]*?)<\/div>/);
+  if (!m) return null;
+  return m[1]
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#039;');
+}
+
+/** HTML-Struktur einer neuen Poznote-Excalidraw-Notiz (leere Szene) */
+export function emptyDrawingHtml(): string {
+  const scene = JSON.stringify({ type: 'excalidraw', version: 2, source: 'pozume', elements: [], appState: {}, files: {} });
+  return `<div class="excalidraw-container" contenteditable="false"><p style="text-align:center; padding: 40px; color: #999;">Excalidraw diagram</p><div class="excalidraw-data" style="display: none;">${escapeHtml(scene)}</div></div>`;
+}
+
+/** Handelt es sich um zeichenbaren Inhalt (Excalidraw-HTML, -JSON oder SVG)? */
+export function isDrawingContent(content?: string): boolean {
+  if (!content) return false;
+  const c = content.trimStart();
+  return c.includes('excalidraw-data') || c.includes('data-is-excalidraw') || isExcalidrawContent(c) || c.startsWith('<svg');
+}
+
+interface ExcElement { [k: string]: unknown }
+
+/** Excalidraw-Elemente in das Editor-Modell überführen; nicht editierbare bleiben roh erhalten */
+function fromExcalidraw(elements: ExcElement[]): { els: DrawEl[]; raw: ExcElement[] } {
+  const els: DrawEl[] = [];
+  const raw: ExcElement[] = [];
+  for (const e of elements) {
+    const type = e.type as string;
+    const stroke = (e.strokeColor as string) || '#1a1a1a';
+    const sw = typeof e.strokeWidth === 'number' ? e.strokeWidth * 1.6 : 4;
+    const bg = (e.backgroundColor as string) || 'transparent';
+    const fill = bg === 'transparent' ? 'none' : bg;
+    const x = (e.x as number) ?? 0;
+    const y = (e.y as number) ?? 0;
+    const w = (e.width as number) ?? 0;
+    const h = (e.height as number) ?? 0;
+    const id = nextId();
+    if (type === 'rectangle' && w > 0 && h > 0) {
+      els.push({ id, type: 'rect', x, y, w, h, stroke, strokeWidth: sw, fill });
+    } else if (type === 'ellipse' && w > 0 && h > 0) {
+      els.push({ id, type: 'ellipse', cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2, stroke, strokeWidth: sw, fill });
+    } else if (type === 'diamond' && w > 0 && h > 0) {
+      const cx = x + w / 2, cy = y + h / 2;
+      els.push({ id, type: 'path', d: `M ${cx} ${y} L ${x + w} ${cy} L ${cx} ${y + h} L ${x} ${cy} Z`, stroke, strokeWidth: sw, fill });
+    } else if ((type === 'line' || type === 'arrow') && Array.isArray(e.points)) {
+      const pts = e.points as Array<[number, number]>;
+      if (pts.length >= 2) {
+        const first = pts[0], last = pts[pts.length - 1];
+        els.push({ id, type: 'line', x1: x + first[0], y1: y + first[1], x2: x + last[0], y2: y + last[1], stroke, strokeWidth: sw, arrow: type === 'arrow' });
+      }
+    } else if (type === 'freedraw' && Array.isArray(e.points)) {
+      const pts = e.points as Array<[number, number]>;
+      if (pts.length >= 2) {
+        const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${(x + p[0]).toFixed(1)} ${(y + p[1]).toFixed(1)}`).join(' ');
+        els.push({ id, type: 'path', d, stroke, strokeWidth: sw, fill: 'none' });
+      }
+    } else {
+      raw.push(e);
+    }
+  }
+  return { els, raw };
+}
+
+/** Editor-Modell zurück in Excalidraw-Elemente */
+function toExcalidraw(els: DrawEl[], raw: ExcElement[]): ExcElement[] {
+  const now = Date.now();
+  const base = (id: string) => ({
+    id, angle: 0, fillStyle: 'solid', strokeStyle: 'solid', roughness: 0, opacity: 100,
+    groupIds: [], seed: randSeed(), version: 1, versionNonce: randSeed(),
+    isDeleted: false, boundElements: null, updated: now, link: null, locked: false,
+  });
+  const out: ExcElement[] = raw.map((e) => e);
+  for (const el of els) {
+    const fill = el.type === 'line' ? 'none' : el.fill;
+    const common = { ...base(el.id), strokeColor: el.stroke, strokeWidth: Math.max(1, Math.round(el.strokeWidth / 1.6)), backgroundColor: fill === 'none' ? 'transparent' : fill };
+    switch (el.type) {
+      case 'rect':
+        out.push({ ...common, type: 'rectangle', x: el.x, y: el.y, width: el.w, height: el.h });
+        break;
+      case 'ellipse':
+        out.push({ ...common, type: 'ellipse', x: el.cx - el.rx, y: el.cy - el.ry, width: el.rx * 2, height: el.ry * 2 });
+        break;
+      case 'line':
+        out.push({
+          ...common, type: el.arrow ? 'arrow' : 'line',
+          x: Math.min(el.x1, el.x2), y: Math.min(el.y1, el.y2),
+          width: Math.abs(el.x2 - el.x1), height: Math.abs(el.y2 - el.y1),
+          points: [[el.x1 - Math.min(el.x1, el.x2), el.y1 - Math.min(el.y1, el.y2)], [el.x2 - Math.min(el.x1, el.x2), el.y2 - Math.min(el.y1, el.y2)]],
+          lastPointArrows: el.arrow ? ['end'] : null,
+        });
+        break;
+      case 'path': {
+        const nums = el.d.match(/-?[\d.]+/g)?.map(Number) ?? [];
+        const xs = nums.filter((_, i) => i % 2 === 0);
+        const ys = nums.filter((_, i) => i % 2 === 1);
+        if (xs.length < 2) break;
+        const minX = Math.min(...xs), minY = Math.min(...ys);
+        const pts: Array<[number, number]> = [];
+        for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i] - minX, nums[i + 1] - minY]);
+        out.push({
+          ...common, type: 'freedraw',
+          x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY,
+          points: pts, pressures: pts.map(() => 0.5), simulatePressure: false,
+        });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** SVG-Quelltext in Elemente zerlegen */
+function parseSvg(content: string): { els: DrawEl[]; viewBox: [number, number] } {
+  const els: DrawEl[] = [];
   let viewBox: [number, number] = [800, 1000];
   const vbMatch = content.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
   if (vbMatch) viewBox = [parseFloat(vbMatch[1]), parseFloat(vbMatch[2])];
-
   const attr = (tag: string, name: string): string | null => {
     const m = tag.match(new RegExp(`${name}="([^"]*)"`));
     return m ? m[1] : null;
   };
-
-  const tagRe = /<(path|rect|ellipse|line)\b[^>]*\/?>(?:<\/\1>)?/g;
+  const tagRe = /<(path|rect|ellipse|line)\b[^>]*\/?>/g;
   let m: RegExpExecArray | null;
-  let lastIdx = 0;
   while ((m = tagRe.exec(content)) !== null) {
-    const before = content.slice(lastIdx, m.index);
-    if (before.replace(/[\s<>/]|svg|g|defs|background/g, '').trim()) raw.push(before.trim());
-    lastIdx = m.index + m[0].length;
     const tag = m[0];
     const stroke = attr(tag, 'stroke') ?? '#1a1a1a';
     const strokeWidth = parseFloat(attr(tag, 'stroke-width') ?? '4') || 4;
@@ -48,17 +174,17 @@ function parseSvg(content: string): { elements: DrawEl[]; raw: string[]; viewBox
     const id = nextId();
     if (m[1] === 'path') {
       const d = attr(tag, 'd');
-      if (d) elements.push({ id, type: 'path', d, stroke, strokeWidth, fill });
+      if (d) els.push({ id, type: 'path', d, stroke, strokeWidth, fill });
     } else if (m[1] === 'rect') {
       const x = parseFloat(attr(tag, 'x') ?? '0'), y = parseFloat(attr(tag, 'y') ?? '0');
       const w = parseFloat(attr(tag, 'width') ?? '0'), h = parseFloat(attr(tag, 'height') ?? '0');
-      if (w > 0 && h > 0) elements.push({ id, type: 'rect', x, y, w, h, stroke, strokeWidth, fill });
+      if (w > 0 && h > 0) els.push({ id, type: 'rect', x, y, w, h, stroke, strokeWidth, fill });
     } else if (m[1] === 'ellipse') {
       const cx = parseFloat(attr(tag, 'cx') ?? '0'), cy = parseFloat(attr(tag, 'cy') ?? '0');
       const rx = parseFloat(attr(tag, 'rx') ?? '0'), ry = parseFloat(attr(tag, 'ry') ?? '0');
-      if (rx > 0 && ry > 0) elements.push({ id, type: 'ellipse', cx, cy, rx, ry, stroke, strokeWidth, fill });
+      if (rx > 0 && ry > 0) els.push({ id, type: 'ellipse', cx, cy, rx, ry, stroke, strokeWidth, fill });
     } else if (m[1] === 'line') {
-      elements.push({
+      els.push({
         id, type: 'line',
         x1: parseFloat(attr(tag, 'x1') ?? '0'), y1: parseFloat(attr(tag, 'y1') ?? '0'),
         x2: parseFloat(attr(tag, 'x2') ?? '0'), y2: parseFloat(attr(tag, 'y2') ?? '0'),
@@ -66,11 +192,11 @@ function parseSvg(content: string): { elements: DrawEl[]; raw: string[]; viewBox
       });
     }
   }
-  return { elements, raw, viewBox };
+  return { els, viewBox };
 }
 
-function serializeSvg(elements: DrawEl[], viewBox: [number, number]): string {
-  const body = elements.map((el) => {
+function serializeSvg(els: DrawEl[], viewBox: [number, number]): string {
+  const body = els.map((el) => {
     switch (el.type) {
       case 'path': return `<path d="${el.d}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}"/>`;
       case 'rect': return `<rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" stroke="${el.stroke}" stroke-width="${el.strokeWidth}" fill="${el.fill}"/>`;
@@ -92,10 +218,12 @@ function serializeSvg(elements: DrawEl[], viewBox: [number, number]): string {
 
 interface Props {
   content: string;
-  onChange: (svg: string) => void;
+  /** true = beim Speichern in die Poznote-Excalidraw-HTML-Struktur wandeln (SVG-Anhang-Fallback) */
+  saveAsExcalidrawHtml?: boolean;
+  onChange: (next: string) => void;
 }
 
-export default function DrawingEditor({ content, onChange }: Props) {
+export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -104,15 +232,41 @@ export default function DrawingEditor({ content, onChange }: Props) {
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
 
-  const parsed = useMemo(() => parseSvg(content), [content]);
-  const elementsRef = useRef<DrawEl[]>(parsed.elements.map((e) => ({ ...e })));
-  const viewBoxRef = useRef<[number, number]>(parsed.viewBox);
+  // Einmalige Initialisierung aus dem Inhalt (Excalidraw-HTML, -JSON oder SVG)
+  const init = useMemo(() => {
+    const sceneJson = extractExcalidrawScene(content) ?? (isExcalidrawContent(content) ? content.trimStart() : null);
+    if (sceneJson) {
+      const scene = JSON.parse(sceneJson);
+      const { els, raw } = fromExcalidraw(scene.elements ?? []);
+      let maxX = 100, maxY = 100;
+      for (const e of scene.elements ?? []) {
+        maxX = Math.max(maxX, ((e.x as number) ?? 0) + ((e.width as number) ?? 0));
+        maxY = Math.max(maxY, ((e.y as number) ?? 0) + ((e.height as number) ?? 0));
+      }
+      return {
+        els, raw,
+        viewBox: [Math.min(4000, Math.ceil(maxX / 100) * 100 + 100), Math.min(4000, Math.ceil(maxY / 100) * 100 + 100)] as [number, number],
+        excalidraw: true,
+        html: content.includes('excalidraw-data'),
+        originalHtml: content,
+        appState: scene.appState ?? {},
+        files: scene.files ?? {},
+      };
+    }
+    const { els, viewBox } = parseSvg(content);
+    return { els, raw: [] as ExcElement[], viewBox, excalidraw: false, html: false, originalHtml: '', appState: {}, files: {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const elementsRef = useRef<DrawEl[]>(init.els.map((e) => ({ ...e })));
+  const rawRef = useRef<ExcElement[]>(init.raw);
+  const viewBoxRef = useRef<[number, number]>(init.viewBox);
   const [render, setRender] = useState(0);
   const bump = () => setRender((n) => n + 1);
 
   const canvasH = Math.max(320, Math.min(560, winH * 0.52));
   const scale = canvasH / viewBoxRef.current[1];
-  const canvasW = viewBoxRef.current[0] * scale;
+  const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
 
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const penPointsRef = useRef<string[]>([]);
@@ -121,7 +275,25 @@ export default function DrawingEditor({ content, onChange }: Props) {
   const commit = () => {
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
-    onChange(serializeSvg(elementsRef.current, viewBoxRef.current));
+    if (init.excalidraw) {
+      const json = JSON.stringify({ type: 'excalidraw', version: 2, source: 'pozume', elements: toExcalidraw(elementsRef.current, rawRef.current), appState: init.appState, files: init.files });
+      if (init.html) {
+        // Poznote-HTML: nur das versteckte Szenen-Div austauschen, <img> (Vorschau) bleibt stehen
+        const next = init.originalHtml.replace(
+          /(<div class="excalidraw-data"[^>]*>)[\s\S]*?(<\/div>)/,
+          `$1${escapeHtml(json)}$2`,
+        );
+        onChange(next);
+      } else {
+        onChange(json);
+      }
+    } else if (saveAsExcalidrawHtml) {
+      // SVG-Anhang-Fallback: Elemente ins Excalidraw-Format wandeln, damit die Web-UI editieren kann
+      const json = JSON.stringify({ type: 'excalidraw', version: 2, source: 'pozume', elements: toExcalidraw(elementsRef.current, []), appState: {}, files: {} });
+      onChange(`<div class="excalidraw-container" contenteditable="false"><p style="text-align:center; padding: 40px; color: #999;">Excalidraw diagram</p><div class="excalidraw-data" style="display: none;">${escapeHtml(json)}</div></div>`);
+    } else {
+      onChange(serializeSvg(elementsRef.current, viewBoxRef.current));
+    }
   };
 
   const toCanvas = (x: number, y: number) => ({ x: x / scale, y: y / scale });
@@ -130,7 +302,7 @@ export default function DrawingEditor({ content, onChange }: Props) {
     const before = elementsRef.current.length;
     elementsRef.current = elementsRef.current.filter((el) => {
       const b = bounds(el);
-      return !(cx >= b.x0 - 6 && cx <= b.x1 + 6 && cy >= b.y0 - 6 && cy <= b.y1 + 6);
+      return !(cx >= b.x0 - 8 && cx <= b.x1 + 8 && cy >= b.y0 - 8 && cy <= b.y1 + 8);
     });
     if (elementsRef.current.length !== before) { dirtyRef.current = true; bump(); }
   };

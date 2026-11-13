@@ -5,6 +5,7 @@ import { usePalette, spacing, radius, typeFor, shadow, tagColors,
 } from '../theme';
 import { useColorScheme } from 'react-native';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
+import { isDrawingContent } from './DrawingEditor';
 import { t } from '../i18n';
 import * as Haptics from 'expo-haptics';
 import type { Note } from '../api';
@@ -29,7 +30,7 @@ export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
         <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
         {note.favorite ? <Text style={styles.star}>★</Text> : null}
       </View>
-      {note.type === 'excalidraw' ? (
+      {note.type === 'excalidraw' || isDrawingContent(note.content) ? (
         <Text style={styles.excerpt} numberOfLines={1}>🎨 {t('list.excalidraw')}</Text>
       ) : excerpt(note.content) ? (
         <Text style={styles.excerpt} numberOfLines={2}>{excerpt(note.content)}</Text>

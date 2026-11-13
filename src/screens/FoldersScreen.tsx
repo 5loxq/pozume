@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert, RefreshControl,
 } from 'react-native';
@@ -65,15 +65,25 @@ export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
+  const inputRef = useRef<TextInput>(null);
+
   const createFolder = async () => {
     const name = newName.trim();
-    if (!name || creating) return;
+    console.warn(`[folders] create: name="${name}" creating=${creating} ws="${firstWorkspace ?? '-'}"`);
+    if (!name) {
+      // Leeres Feld: Eingabe fokussieren statt still nichts zu tun
+      inputRef.current?.focus();
+      return;
+    }
+    if (creating) return;
     setCreating(true);
     try {
-      await client.createFolder(name, firstWorkspace ?? undefined);
+      const res = await client.createFolder(name, firstWorkspace ?? undefined);
+      console.warn(`[folders] created ok: ${JSON.stringify(res).slice(0, 120)}`);
       setNewName('');
       await load();
     } catch (e: any) {
+      console.warn(`[folders] create failed: status=${e?.status} msg=${String(e?.message).slice(0, 150)}`);
       Alert.alert(t('common.error'), e?.message ?? String(e));
     } finally {
       setCreating(false);
@@ -104,6 +114,7 @@ export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
         </View>
         <View style={styles.newRow}>
           <TextInput
+            ref={inputRef}
             style={styles.newInput}
             placeholder={t('folders.newPlaceholder')}
             placeholderTextColor={colors.textFaint}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Share } from 'react-native';
@@ -11,7 +11,7 @@ import { setReminder, removeReminder, getReminder } from '../api/reminders';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
-import DrawingEditor from '../components/DrawingEditor';
+import DrawingEditor, { isDrawingContent, emptyDrawingHtml } from '../components/DrawingEditor';
 import { usePalette, spacing, radius, typeFor, primaryButton,
   Palette,
 } from '../theme';
@@ -21,6 +21,7 @@ import type { PoznoteClient, Note } from '../api';
 interface Props {
   client: PoznoteClient;
   note: Note | null;          // null = neue Notiz
+  drawing?: boolean;          // true = neue Notiz startet als Zeichnung
   onClose: () => void;
   onSaved: (note: Note) => void;
   onDeleted: (id: number) => void;
@@ -37,16 +38,19 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export default function NoteEditorScreen({ client, note, onClose, onSaved, onDeleted }: Props) {
+export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
   const isNew = note == null;
   const [heading, setHeading] = useState(note?.heading ?? '');
-  const [content, setContent] = useState(note?.content ?? '');
+  const [content, setContent] = useState(isNew && drawing ? emptyDrawingHtml() : (note?.content ?? ''));
   const [tags, setTags] = useState(note?.tags ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+  // Die Notizliste liefert keinen Inhalt — die volle Notiz muss nachgeladen werden,
+  // bevor der Editor interaktiv wird (sonst überschreibt Autosave leeren Inhalt).
+  const [loaded, setLoaded] = useState(isNew);
   const noteIdRef = useRef<number | null>(note?.id ?? null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ heading, content, tags });
@@ -60,7 +64,7 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
         const res = await client.createNote({
           heading: body.heading || 'Ohne Titel',
           content: body.content,
-          type: 'markdown',
+          type: isDrawingContent(body.content) ? 'note' : 'markdown',
           tags: body.tags,
         });
         noteIdRef.current = res.note.id;
@@ -122,7 +126,52 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   const [shared, setShared] = useState(false);
   const [sharedUrl, setSharedUrl] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const isExcalidraw = note?.type === 'excalidraw';
+  // Ältere Excalidraw-Notizen tragen die Zeichnung nur als SVG-Anhang (Inhalt leer oder nur <img>)
+  const [svgFallback, setSvgFallback] = useState<string | null>(null);
+  // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
+  const drawingContent = isDrawingContent(content) ? content : svgFallback;
+  const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
+
+  // Volle Notiz nachladen (Inhalt fehlt in der Listen-Antwort)
+  useEffect(() => {
+    if (note?.id == null) return;
+    let cancelled = false;
+    client.getNote(note.id)
+      .then(async (res) => {
+        if (cancelled || !res.note) return;
+        const n = res.note;
+        const c = n.content ?? '';
+        setHeading(n.heading ?? '');
+        setContent(c);
+        setTags(n.tags ?? '');
+        setPinned(!!n.pinned);
+        setFolderId(n.folder_id ?? null);
+        // Zeichnung nur als SVG-Anhang? (älteres Format: Inhalt leer oder nur <img>) → SVG laden
+        if (!isDrawingContent(c) && (c.trim() === '' || c.includes('excalidraw'))) {
+          try {
+            const atts = (await client.listAttachments(note.id)).attachments ?? [];
+            const svgAtt = atts.find((a) =>
+              (a.original_filename || a.filename).toLowerCase().endsWith('.svg') ||
+              (a.file_type ?? '').includes('svg'));
+            if (svgAtt) {
+              const r = await fetch(`${client.cfg.baseUrl}/api/v1/notes/${note.id}/attachments/${svgAtt.id}`, {
+                headers: {
+                  Authorization: 'Basic ' + btoa(`${client.cfg.username}:${client.cfg.password}`),
+                  'X-User-ID': client.cfg.userId ?? '1',
+                },
+              });
+              if (r.ok) {
+                const svg = await r.text();
+                if (!cancelled && svg.trimStart().startsWith('<svg')) setSvgFallback(svg);
+              }
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [note?.id]);
 
   const isFavorite = !!(note?.favorite);
 
@@ -320,6 +369,16 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
     saveState === 'saved' ? t('editor.saved') :
     saveState === 'dirty' ? t('editor.unsaved') : '';
 
+  if (!loaded) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (locked && pinPrompt) {
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -406,10 +465,11 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
           value={heading}
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
         />
-        {isExcalidraw ? (
+        {isExcalidraw && drawingContent ? (
           <DrawingEditor
-            content={content}
-            onChange={(svg) => { setContent(svg); scheduleSave(); }}
+            content={drawingContent}
+            saveAsExcalidrawHtml={svgFallback != null && !isDrawingContent(content)}
+            onChange={(next) => { setContent(next); scheduleSave(); }}
           />
         ) : preview ? (
           <View style={styles.previewWrap}>

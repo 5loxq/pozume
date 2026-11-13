@@ -16,6 +16,7 @@ interface Props {
   client: PoznoteClient;
   onOpenNote: (note: Note) => void;
   onCreateNote: () => void;
+  onCreateDrawing?: () => void;
   folderId?: number;
   title?: string;
   onBack?: () => void;
@@ -29,7 +30,7 @@ interface Props {
   onTagPress?: (tag: string) => void;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, tag, onBackFromTag, onTagPress }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCreateDrawing, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, tag, onBackFromTag, onTagPress }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -238,6 +239,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
             onRefresh={() => { setRefreshing(true); load({ silent: true }); }} />
         }
       />
+      {onCreateDrawing ? (
+        <TouchableOpacity style={[styles.fabDraw, shadow]} onPress={onCreateDrawing} activeOpacity={0.85}>
+          <Text style={styles.fabDrawText}>🎨</Text>
+        </TouchableOpacity>
+      ) : null}
       <TouchableOpacity style={[styles.fab, shadow]} onPress={onCreateNote} activeOpacity={0.85}>
         <Text style={styles.fabText}>＋</Text>
       </TouchableOpacity>
@@ -288,5 +294,12 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     width: 60, height: 60, borderRadius: 30,
     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
+  fabDraw: {
+    position: 'absolute', right: spacing.xl, bottom: spacing.xl + 72,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  fabDrawText: { fontSize: 20 },
   fabText: { color: '#fff', fontSize: 30, marginTop: -2 },
 });

@@ -18,7 +18,7 @@ import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
   | { name: 'list' }
-  | { name: 'editor'; note: Note | null }
+  | { name: 'editor'; note: Note | null; drawing?: boolean }
   | { name: 'folders' }
   | { name: 'folderNotes'; folderId: number; folderName: string }
   | { name: 'trash' }
@@ -71,6 +71,7 @@ function AppInner() {
 
   const openNote = useCallback((note: Note) => setRoute({ name: 'editor', note }), []);
   const createNote = useCallback(() => setRoute({ name: 'editor', note: null }), []);
+  const createDrawing = useCallback(() => setRoute({ name: 'editor', note: null, drawing: true }), []);
   const closeEditor = useCallback(() => setRoute({ name: 'list' }), []);
   const onDeleted = useCallback(() => setRoute({ name: 'list' }), []);
 
@@ -113,6 +114,7 @@ function AppInner() {
         <View style={{ flex: 1, flexDirection: 'row', backgroundColor: palette.bg }}>
           <View style={{ width: '42%', borderRightWidth: 1, borderRightColor: palette.border }}>
             <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
+              onCreateDrawing={createDrawing}
               onOpenFolders={() => setRoute({ name: 'folders' })}
               onOpenTrash={() => setRoute({ name: 'trash' })}
               onOpenSettings={() => setRoute({ name: 'settings' })}
@@ -121,9 +123,10 @@ function AppInner() {
               onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })} />
           </View>
           <View style={{ flex: 1 }}>
-            <NoteEditorScreen
+            <NoteEditorScreen key={route.note?.id ?? 'new'}
               client={client}
               note={route.note}
+              drawing={route.drawing}
               onClose={closeEditor}
               onSaved={() => {}}
               onDeleted={onDeleted}
@@ -138,9 +141,10 @@ function AppInner() {
     return (
       <>
         <StatusBar style="auto" />
-        <NoteEditorScreen
+        <NoteEditorScreen key={route.note?.id ?? 'new'}
           client={client}
           note={route.note}
+          drawing={route.drawing}
           onClose={closeEditor}
           onSaved={() => {}}
           onDeleted={onDeleted}
@@ -240,6 +244,7 @@ function AppInner() {
     <>
       <StatusBar style="auto" />
       <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
+        onCreateDrawing={createDrawing}
         onOpenFolders={() => setRoute({ name: 'folders' })}
         onOpenTrash={() => setRoute({ name: 'trash' })}
         onOpenSettings={() => setRoute({ name: 'settings' })}
