@@ -17,6 +17,8 @@ Pozume connects to your **own** Poznote server. Your notes stay on your hardware
 - 🗑 **Trash** — view, restore, delete forever
 - 📤 **Share sheet** — share any note as formatted text
 - ⚙️ **Settings** — app lock toggle, language override, server info, sign out
+- 🔄 **Sorting** — last updated, created, title A–Z
+- 🔢 **Word count & reading time** in the editor
 - 📴 **Offline-first** — last known state from local cache, background refresh
 - 🔒 **Security** — Face ID / Touch ID app lock, credentials in the iOS Keychain (SecureStore), app-password ready
 - 🌍 **Bilingual from day one** — German & English, auto-detection + manual override, live switching
