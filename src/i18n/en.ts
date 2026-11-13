@@ -1,4 +1,5 @@
 import type { TranslationKey } from './de';
+
 export const en: Record<TranslationKey, string> = {
   'nav.notes': 'Notes',
   'nav.folders': 'Folders',
@@ -83,7 +84,6 @@ export const en: Record<TranslationKey, string> = {
   'list.sortTitle': 'Title A–Z',
   'list.sort': 'Sort',
   'editor.boldHint': '**bold** and `code` are supported',
-} as const;,
   'ai.title': 'AI Assistant',
   'ai.placeholder': 'Ask something… "Summarize note X"',
   'ai.send': 'Send',

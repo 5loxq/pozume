@@ -1,10 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { usePalette, spacing, type} from '../theme';
+import { usePalette, spacing, type,
+  Palette,
+} from '../theme';
 
 /** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes */
 export default function MarkdownView({ content }: { content: string }) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const lines = content.split('\n');
   const out: React.ReactNode[] = [];
 
@@ -61,7 +64,7 @@ export default function MarkdownView({ content }: { content: string }) {
   return <View>{out}</View>;
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   h1: { fontSize: 24, fontWeight: '800', color: colors.text, marginTop: spacing.md, marginBottom: spacing.sm, letterSpacing: -0.3 },
   h2: { fontSize: 20, fontWeight: '700', color: colors.text, marginTop: spacing.lg, marginBottom: spacing.sm },
   h3: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },

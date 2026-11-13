@@ -3,8 +3,10 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow} from '../theme';
-import { t, Locale, getLocale, getLocaleMode, saveLocaleOverride, type LocaleMode } from '../i18n';
+import { usePalette, spacing, radius, type, shadow,
+  Palette,
+} from '../theme';
+import { t, Locale, getLocale, getLocaleMode, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer } from '../api/store';
 
@@ -18,6 +20,7 @@ interface Props {
 
 export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onBack }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [lockEnabled, setLockEnabled] = useState(false);
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const locale = getLocale();
@@ -101,7 +104,7 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, color: colors.text, width: 40 },

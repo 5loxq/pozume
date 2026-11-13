@@ -4,7 +4,9 @@ import {
   KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, primaryButton} from '../theme';
+import { usePalette, spacing, radius, type, shadow, primaryButton,
+  Palette,
+} from '../theme';
 import { t } from '../i18n';
 import { loadAiConfig, saveAiConfig, clearAiConfig, aiChat, type AiConfig } from '../api/ai';
 import type { PoznoteClient, Note } from '../api';
@@ -19,6 +21,7 @@ interface Props {
 
 export default function AiScreen({ client, notes, onBack }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -172,7 +175,7 @@ export default function AiScreen({ client, notes, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, color: colors.text, width: 44 },

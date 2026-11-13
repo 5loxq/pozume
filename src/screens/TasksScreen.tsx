@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow } from '../theme';
+import { usePalette, spacing, radius, type, shadow,
+  Palette,
+} from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { extractTasks, type Task } from '../utils';
@@ -14,6 +16,7 @@ interface Props {
 
 export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const locale = getLocale();
   const [tasks, setTasks] = useState<(Task & { note?: Note })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,7 +102,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, width: 40 },

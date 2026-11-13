@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { usePalette, spacing, radius, type, shadow, tagColors } from '../theme';
+import { usePalette, spacing, radius, type, shadow, tagColors,
+  Palette,
+} from '../theme';
 import { useColorScheme } from 'react-native';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
 import * as Haptics from 'expo-haptics';
@@ -15,6 +17,7 @@ interface Props {
 
 export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const isDark = useColorScheme() === 'dark';
   const tags = parseTags(note.tags);
   return (
@@ -44,7 +47,7 @@ export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,

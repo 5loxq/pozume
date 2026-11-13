@@ -36,7 +36,14 @@ export function getLocaleMode(): LocaleMode {
   return override ?? 'auto';
 }
 
-export function t(key: TranslationKey, locale: Locale = getLocale(), vars?: Record<string, string | number>): string {
+/** t(key, vars) oder t(key, locale, vars) — beide Signaturen erlaubt */
+export function t(
+  key: TranslationKey,
+  localeOrVars?: Locale | Record<string, string | number>,
+  maybeVars?: Record<string, string | number>,
+): string {
+  const locale: Locale = typeof localeOrVars === 'string' ? localeOrVars : getLocale();
+  const vars = typeof localeOrVars === 'object' && localeOrVars !== null ? localeOrVars : maybeVars;
   let out: string = dicts[locale][key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, String(v));

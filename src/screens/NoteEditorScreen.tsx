@@ -9,7 +9,9 @@ import { setReminder, removeReminder, getReminder } from '../api/reminders';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
-import { usePalette, spacing, radius, type, primaryButton} from '../theme';
+import { usePalette, spacing, radius, type, primaryButton,
+  Palette,
+} from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 
@@ -23,6 +25,7 @@ interface Props {
 
 export default function NoteEditorScreen({ client, note, onClose, onSaved, onDeleted }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const isNew = note == null;
   const [heading, setHeading] = useState(note?.heading ?? '');
   const [content, setContent] = useState(note?.content ?? '');
@@ -302,7 +305,7 @@ export default function NoteEditorScreen({ client, note, onClose, onSaved, onDel
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   topBar: {
     flexDirection: 'row', alignItems: 'center',

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, FlatList, ActivityIndicator } from 'react-native';
-import { usePalette, spacing, radius, type, shadow, primaryButton} from '../theme';
+import { usePalette, spacing, radius, type, shadow, primaryButton,
+  Palette,
+} from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 
@@ -16,6 +18,7 @@ interface Props {
 
 export default function FolderPickerSheet({ visible, client, currentFolderId, onSelect, onClose }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -68,7 +71,7 @@ export default function FolderPickerSheet({ visible, client, currentFolderId, on
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(21,26,35,0.4)', justifyContent: 'flex-end' },
   backdropTouch: { flex: 1 },
   sheet: {

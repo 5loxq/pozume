@@ -4,7 +4,9 @@ import {
   StyleSheet, RefreshControl, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, shadowSoft, greetingForHour} from '../theme';
+import { usePalette, spacing, radius, type, shadow, shadowSoft, greetingForHour,
+  Palette,
+} from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
@@ -29,6 +31,7 @@ interface Props {
 
 export default function NotesListScreen({ client, onOpenNote, onCreateNote, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, tag, onBackFromTag, onTagPress }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -241,7 +244,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, fold
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   listContent: { padding: spacing.lg, paddingBottom: 100 },
   header: { marginBottom: spacing.lg },

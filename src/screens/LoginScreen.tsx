@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow, shadowSoft, primaryButton} from '../theme';
+import { usePalette, spacing, radius, type, shadow, shadowSoft, primaryButton,
+  Palette,
+} from '../theme';
 import { t } from '../i18n';
 import { PoznoteClient } from '../api';
 import { saveServer } from '../api/store';
 
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -63,7 +66,7 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   hero: { alignItems: 'center', paddingTop: spacing.xxl, paddingBottom: spacing.xl },

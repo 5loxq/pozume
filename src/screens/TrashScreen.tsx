@@ -3,7 +3,9 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, type, shadow} from '../theme';
+import { usePalette, spacing, radius, type, shadow,
+  Palette,
+} from '../theme';
 import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { formatRelativeDate, excerpt } from '../utils';
@@ -15,6 +17,7 @@ interface Props {
 
 export default function TrashScreen({ client, onBack }: Props) {
   const colors = usePalette();
+  const styles = getStyles(colors);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const locale = getLocale();
@@ -62,7 +65,7 @@ export default function TrashScreen({ client, onBack }: Props) {
   const renderItem = ({ item }: { item: Note }) => (
     <View style={[styles.row, shadow]}>
       <View style={styles.rowText}>
-        <Text style={styles.title} numberOfLines={1}>{item.heading || '…'}</Text>
+        <Text style={styles.rowTitle} numberOfLines={1}>{item.heading || '…'}</Text>
         {excerpt(item.content) ? <Text style={styles.excerpt} numberOfLines={1}>{excerpt(item.content, 80)}</Text> : null}
         <Text style={styles.date}>{formatRelativeDate(item.updated_at, locale)}</Text>
       </View>
@@ -104,7 +107,7 @@ export default function TrashScreen({ client, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row', alignItems: 'center',
@@ -118,7 +121,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm,
   },
   rowText: { flex: 1, marginRight: spacing.sm },
-  title: { ...type.h2, fontSize: 15 },
+  rowTitle: { ...type.h2, fontSize: 15 },
   excerpt: { ...type.muted, marginTop: 2 },
   date: { fontSize: 11, color: colors.textFaint, marginTop: 4 },
   action: { paddingHorizontal: spacing.sm },
