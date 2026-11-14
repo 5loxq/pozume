@@ -139,5 +139,6 @@ export const de = {
   'tasks.fromNote': 'aus',
   'tasks.open': 'offen',
   'tasks.done': 'erledigt',
+  'draw.missing': 'Die Zeichnung dieser Notiz ist nicht mehr auf dem Server (Anhang fehlt). Du kannst neu zeichnen — dabei wird eine neue Excalidraw-Notiz erzeugt.',
 } as const;
 export type TranslationKey = keyof typeof de;

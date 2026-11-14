@@ -128,6 +128,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   // Ältere Excalidraw-Notizen tragen die Zeichnung nur als SVG-Anhang (Inhalt leer oder nur <img>)
   const [svgFallback, setSvgFallback] = useState<string | null>(null);
+  const [drawMissing, setDrawMissing] = useState(false);
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
@@ -153,7 +154,10 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             const svgAtt = atts.find((a) =>
               (a.original_filename || a.filename).toLowerCase().endsWith('.svg') ||
               (a.file_type ?? '').includes('svg'));
-            if (svgAtt) {
+            if (!svgAtt) {
+              // Zeichnung fehlt (Anhang geloescht?) — Nutzer informieren statt stiller Leere
+              if (!cancelled) setDrawMissing(true);
+            } else {
               const r = await fetch(`${client.cfg.baseUrl}/api/v1/notes/${note.id}/attachments/${svgAtt.id}`, {
                 headers: {
                   Authorization: 'Basic ' + btoa(`${client.cfg.username}:${client.cfg.password}`),
@@ -457,6 +461,13 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </TouchableOpacity>
         </ScrollView>
       )}
+      {drawMissing && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.dangerSoft }]}>
+          <Text style={{ color: colors.danger, fontSize: 13 }}>
+            {t('draw.missing')}
+          </Text>
+        </View>
+      )}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <TextInput
           style={styles.titleInput}
@@ -530,6 +541,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
 
 const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
+  missingBanner: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   pinTopBar: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   topBar: {
     flexDirection: 'row', alignItems: 'center',

@@ -61,8 +61,10 @@ export class PoznoteClient {
       clearTimeout(timer);
     }
     if (!res.ok) {
-      const text = await res.text();
-      throw new PoznoteError(res.status, text.slice(0, 300));
+      const text = await res.text().catch(() => '');
+      const isHtml = text.trimStart().startsWith('<');
+      const detail = isHtml ? 'HTML-Fehlerseite (ggf. WAF/CSRF)' : text.slice(0, 200);
+      throw new PoznoteError(res.status, `HTTP ${res.status}: ${detail}`);
     }
     return res.json() as Promise<T>;
   }

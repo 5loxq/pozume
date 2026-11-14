@@ -268,6 +268,20 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const scale = canvasH / viewBoxRef.current[1];
   const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
 
+  const canvasRef = useRef<View>(null);
+  const canvasOrigin = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const measuredOnce = useRef(false);
+  const measureCanvas = () => {
+    canvasRef.current?.measureInWindow((wx, wy) => {
+      canvasOrigin.current = { x: wx, y: wy };
+      measuredOnce.current = true;
+    });
+  };
+  const toLocal = (pageX: number, pageY: number) => {
+    if (!measuredOnce.current) measureCanvas();
+    return toCanvas(pageX - canvasOrigin.current.x, pageY - canvasOrigin.current.y);
+  };
+
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const penPointsRef = useRef<string[]>([]);
   const dirtyRef = useRef(false);
@@ -311,13 +325,14 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
-      const { x, y } = toCanvas(e.nativeEvent.locationX, e.nativeEvent.locationY);
+      measureCanvas();
+      const { x, y } = toLocal(e.nativeEvent.pageX, e.nativeEvent.pageY);
       startRef.current = { x, y };
       if (tool === 'pen') penPointsRef.current = [`M ${x.toFixed(1)} ${y.toFixed(1)}`];
       if (tool === 'erase') eraseAt(x, y);
     },
     onPanResponderMove: (e) => {
-      const { x, y } = toCanvas(e.nativeEvent.locationX, e.nativeEvent.locationY);
+      const { x, y } = toLocal(e.nativeEvent.pageX, e.nativeEvent.pageY);
       const s = startRef.current;
       if (!s) return;
       if (tool === 'pen') {
@@ -353,6 +368,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   })).current;
 
   const undo = () => {
+    if (elementsRef.current.length === 0) return;
     elementsRef.current = elementsRef.current.slice(0, -1);
     dirtyRef.current = true;
     bump();
@@ -394,8 +410,8 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           <Text style={styles.toolIcon}>🗑</Text>
         </TouchableOpacity>
       </View>
-      <View style={[styles.canvas, { width: canvasW, height: canvasH }]} {...pan.panHandlers}>
-        <Svg width={canvasW} height={canvasH} viewBox={`0 0 ${viewBoxRef.current[0]} ${viewBoxRef.current[1]}`}>
+      <View ref={canvasRef} style={[styles.canvas, { width: canvasW, height: canvasH }]} {...pan.panHandlers}>
+        <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`0 0 ${viewBoxRef.current[0]} ${viewBoxRef.current[1]}`}>
           <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={colors.surface} />
           {elementsRef.current.map((el) => renderEl(el))}
         </Svg>

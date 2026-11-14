@@ -141,4 +141,6 @@ export const en: Record<TranslationKey, string> = {
   'tasks.fromNote': 'from',
   'tasks.open': 'open',
   'tasks.done': 'done',
+  'draw.missing': 'The drawing of this note is no longer on the server (attachment missing). You can draw again — a new Excalidraw note will be created.',
+
 };
