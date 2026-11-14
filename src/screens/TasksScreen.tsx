@@ -1,10 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, typeFor, shadow,
-  Palette,
-} from '../theme';
-import { t, getLocale } from '../i18n';
+import { usePalette, spacing, radius, typeFor, shadow } from '../theme';
+import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { extractTasks, type Task } from '../utils';
 
@@ -17,8 +15,7 @@ interface Props {
 export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
-  const locale = getLocale();
+  const styles = useMemo(() => getStyles(type), [colors]);
   const [tasks, setTasks] = useState<(Task & { note?: Note; serverTaskId?: number })[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,7 +28,11 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
         client.listNotes().catch(() => null),
       ]);
       const all: (Task & { note?: Note; serverTaskId?: number })[] = [];
+      // Notizen, deren Aufgaben der Server schon über /tasks geliefert hat —
+      // deren Checkboxen dürfen nicht zusätzlich lokal extrahiert werden (Duplikate)
+      const serverNoteIds = new Set<number>();
       for (const n of taskRes?.notes ?? []) {
+        serverNoteIds.add(n.id);
         for (const task of n.tasks ?? []) {
           all.push({
             noteId: n.id, noteHeading: n.heading, text: task.text,
@@ -40,7 +41,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
           });
         }
       }
-      const list = (notesRes?.notes ?? []).filter((n) => n.type !== 'tasklist').slice(0, 50);
+      const list = (notesRes?.notes ?? []).filter((n) => n.type !== 'tasklist' && !serverNoteIds.has(n.id)).slice(0, 50);
       const details = await Promise.all(list.map((n) => client.getNote(n.id).catch(() => null)));
       list.forEach((n, i) => {
         const content = details[i]?.note?.content ?? n.content ?? '';
@@ -106,7 +107,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
       ) : (
         <FlatList
           data={tasks}
-          keyExtractor={(_, i) => String(i)}
+          keyExtractor={(item, i) => `${item.noteId}-${item.serverTaskId ?? 'md'}-${item.lineIndex}-${i}`}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
@@ -121,7 +122,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   );
 }
 
-const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
+const getStyles = (type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, width: 40 },

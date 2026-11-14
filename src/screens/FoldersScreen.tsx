@@ -69,7 +69,6 @@ export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
 
   const createFolder = async () => {
     const name = newName.trim();
-    console.warn(`[folders] create: name="${name}" creating=${creating} ws="${firstWorkspace ?? '-'}"`);
     if (!name) {
       // Leeres Feld: Eingabe fokussieren statt still nichts zu tun
       inputRef.current?.focus();
@@ -78,20 +77,35 @@ export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
     if (creating) return;
     setCreating(true);
     try {
-      const res = await client.createFolder(name, firstWorkspace ?? undefined);
-      console.warn(`[folders] created ok: ${JSON.stringify(res).slice(0, 120)}`);
+      await client.createFolder(name, firstWorkspace ?? undefined);
       setNewName('');
       await load();
     } catch (e: any) {
-      console.warn(`[folders] create failed: status=${e?.status} msg=${String(e?.message).slice(0, 150)}`);
       Alert.alert(t('common.error'), e?.message ?? String(e));
     } finally {
       setCreating(false);
     }
   };
 
+  const confirmDeleteFolder = (folder: Folder) => {
+    Alert.alert(t('folders.deleteTitle'), t('folders.deleteText', { name: folder.name }), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await client.deleteFolder(folder.id);
+            load({ silent: true });
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
+
   const renderFolder = ({ item }: { item: Folder }) => (
-    <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)}>
+    <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)} onLongPress={() => confirmDeleteFolder(item)}>
       <Text style={styles.icon}>📁</Text>
       <View style={styles.nameWrap}>
         <Text style={styles.name} numberOfLines={1}>{item.name}</Text>

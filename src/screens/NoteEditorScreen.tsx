@@ -1,22 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, FlatList, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Share } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { setReminder, removeReminder, getReminder } from '../api/reminders';
+import { setReminder, removeReminder } from '../api/reminders';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
+import PromptModal from '../components/PromptModal';
 import DrawingEditor, { isDrawingContent, emptyDrawingHtml } from '../components/DrawingEditor';
-import { usePalette, spacing, radius, typeFor, primaryButton,
+import { usePalette, spacing, radius, typeFor, primaryButton, shadow,
   Palette,
 } from '../theme';
-import { t } from '../i18n';
-import type { PoznoteClient, Note } from '../api';
+import { t, getLocale } from '../i18n';
+import type { PoznoteClient, Note, Backlink, TemplateInfo } from '../api';
 
 interface Props {
   client: PoznoteClient;
@@ -25,9 +26,14 @@ interface Props {
   onClose: () => void;
   onSaved: (note: Note) => void;
   onDeleted: (id: number) => void;
+  onOpenNote?: (note: Note) => void;
+  onOpenVersions?: (noteId: number) => void;
 }
 
 interface Attachment { id: string; filename: string; original_filename?: string; file_size?: number; file_type?: string }
+
+/** Farb-Palette für Notiz-Karten (Hex geht direkt an den Server, unabhängig von dessen Palette) */
+const NOTE_COLORS = ['#3b82f6', '#16a34a', '#dc2626', '#f59e0b', '#7c3aed', '#db2777', '#0d9488'];
 
 function base64FromBytes(bytes: Uint8Array): string {
   let binary = '';
@@ -38,16 +44,20 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted }: Props) {
+export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
+  const locale = getLocale();
   const isNew = note == null;
   const [heading, setHeading] = useState(note?.heading ?? '');
   const [content, setContent] = useState(isNew && drawing ? emptyDrawingHtml() : (note?.content ?? ''));
   const [tags, setTags] = useState(note?.tags ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+  const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
+  const [favorite, setFavorite] = useState(!!note?.favorite);
   // Die Notizliste liefert keinen Inhalt — die volle Notiz muss nachgeladen werden,
   // bevor der Editor interaktiv wird (sonst überschreibt Autosave leeren Inhalt).
   const [loaded, setLoaded] = useState(isNew);
@@ -78,7 +88,8 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       setSaveState('dirty');
-      Alert.alert(t('common.error'), e?.message ?? String(e));
+      const msg = e?.message ?? String(e);
+      Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
     }
   };
 
@@ -126,9 +137,25 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const [shared, setShared] = useState(false);
   const [sharedUrl, setSharedUrl] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [backlinks, setBacklinks] = useState<Backlink[] | null>(null);
+  // Serverseitiger Schreibschutz (PUT /notes/{id}/locked) — nur wenn der Server das Feld liefert
+  const [serverLocked, setServerLocked] = useState(false);
+  const [serverLockSupported, setServerLockSupported] = useState(false);
+  // Server-Erinnerung (ISO) + lokale Erinnerung
+  const [serverReminder, setServerReminder] = useState<string | null>(null);
+  // Karten-Farbe (color_hex aus Server-Antwort)
+  const [noteColorHex, setNoteColorHex] = useState<string | null>(note?.color_hex ?? null);
+  // Notiz-Typ für Konvertierung (markdown ↔ html/note)
+  const [noteType, setNoteType] = useState<string | undefined>(note?.type);
+  // Vorlagen für neue Notizen
+  const [templates, setTemplates] = useState<TemplateInfo[] | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
   // Ältere Excalidraw-Notizen tragen die Zeichnung nur als SVG-Anhang (Inhalt leer oder nur <img>)
   const [svgFallback, setSvgFallback] = useState<string | null>(null);
   const [drawMissing, setDrawMissing] = useState(false);
+  // Prompt-Dialoge (plattformübergreifend, ersetzt iOS-only Alert.prompt)
+  const [promptKind, setPromptKind] = useState<'pin' | 'reminder' | null>(null);
+  const [promptValue, setPromptValue] = useState('');
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
@@ -146,7 +173,13 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         setContent(c);
         setTags(n.tags ?? '');
         setPinned(!!n.pinned);
+        setFavorite(!!n.favorite);
         setFolderId(n.folder_id ?? null);
+        setServerLocked(!!n.locked);
+        setNoteColorHex(n.color_hex ?? null);
+        setNoteType(n.type);
+        // Ältere Server-Versionen kennen kein `locked`-Feld — Chip dann gar nicht erst anbieten
+        setServerLockSupported('locked' in n);
         // Zeichnung nur als SVG-Anhang? (älteres Format: Inhalt leer oder nur <img>) → SVG laden
         if (!isDrawingContent(c) && (c.trim() === '' || c.includes('excalidraw'))) {
           try {
@@ -158,16 +191,8 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
               // Zeichnung fehlt (Anhang geloescht?) — Nutzer informieren statt stiller Leere
               if (!cancelled) setDrawMissing(true);
             } else {
-              const r = await fetch(`${client.cfg.baseUrl}/api/v1/notes/${note.id}/attachments/${svgAtt.id}`, {
-                headers: {
-                  Authorization: 'Basic ' + btoa(`${client.cfg.username}:${client.cfg.password}`),
-                  'X-User-ID': client.cfg.userId ?? '1',
-                },
-              });
-              if (r.ok) {
-                const svg = await r.text();
-                if (!cancelled && svg.trimStart().startsWith('<svg')) setSvgFallback(svg);
-              }
+              const svg = await client.getAttachmentText(note.id, svgAtt.id);
+              if (!cancelled && svg.trimStart().startsWith('<svg')) setSvgFallback(svg);
             }
           } catch {}
         }
@@ -177,8 +202,6 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     return () => { cancelled = true; };
   }, [note?.id]);
 
-  const isFavorite = !!(note?.favorite);
-
   // Gespuerrte Notiz: PIN verlangen (einmal pro Oeffnen)
   useEffect(() => {
     if (note?.id == null) return;
@@ -186,24 +209,24 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       if (v) { setLocked(true); setPinPrompt(true); }
     });
     client.getShare(note.id)
-      .then((r) => { setShared(!!r.shared); setSharedUrl(r.url ?? null); })
+      .then((r) => { setShared(!!(r.public ?? r.shared)); setSharedUrl(r.url ?? null); })
       .catch(() => {});
     client.listAttachments(note.id)
       .then((r) => setAttachments(r.attachments ?? []))
+      .catch(() => {});
+    // Backlinks + Server-Erinnerung laden
+    client.getBacklinks(note.id)
+      .then((r) => setBacklinks(r.backlinks ?? []))
+      .catch(() => setBacklinks([]));
+    client.getNoteReminder(note.id)
+      .then((r) => setServerReminder(r.reminder?.reminder_at ?? null))
       .catch(() => {});
   }, [note?.id]);
 
   const openAttachment = async (att: Attachment) => {
     if (noteId == null) return;
     try {
-      const res = await fetch(`${client.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${att.id}`, {
-        headers: {
-          Authorization: 'Basic ' + btoa(`${client.cfg.username}:${client.cfg.password}`),
-          'X-User-ID': client.cfg.userId ?? '1',
-        },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = await client.getAttachmentBytes(noteId, att.id);
       const fileName = att.original_filename || att.filename || 'anhang';
       const path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
       await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
@@ -232,18 +255,28 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       Alert.alert('🪶', t('lock.unlockNote'));
     } else {
       if (!(await hasPin())) {
-        Alert.prompt(t('lock.enterPass'), '4–8 Ziffern', [
-          { text: t('common.cancel'), style: 'cancel' },
-          { text: t('common.save'), onPress: async (pin?: string) => {
-              if (pin && /^\d{4,8}$/.test(pin)) { await setPin(pin); await lockNote(noteId); Alert.alert('🔒', t('lock.noteLock')); }
-            } },
-        ], 'secure-text');
+        setPromptValue('');
+        setPromptKind('pin');
       } else {
         await lockNote(noteId);
         Alert.alert('🔒', t('lock.noteLock'));
       }
     }
   };
+
+  const submitPinPrompt = async (pin: string) => {
+    if (noteId == null) { setPromptKind(null); return; }
+    if (!pin || !/^\d{4,8}$/.test(pin)) {
+      // Modal offen lassen und Feedback geben statt still zu schließen
+      Alert.alert(t('common.error'), t('lock.enterPass') + ': 4–8 Ziffern');
+      return;
+    }
+    setPromptKind(null);
+    await setPin(pin);
+    await lockNote(noteId);
+    Alert.alert('🔒', t('lock.noteLock'));
+  };
+
   const [showPicker, setShowPicker] = useState(false);
 
   const togglePin = async () => {
@@ -262,10 +295,44 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     if (noteId == null) return;
     try {
       await client.duplicateNote(noteId);
+      onSaved({ ...(note as Note) });
       Alert.alert('🪶', t('editor.duplicated'));
     } catch (e: any) {
       Alert.alert(t('common.error'), e?.message ?? String(e));
     }
+  };
+
+  const toggleServerLock = async () => {
+    if (noteId == null) return;
+    try {
+      await client.setNoteLocked(noteId, !serverLocked);
+      setServerLocked(!serverLocked);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('🔒', !serverLocked ? t('editor.lockSet') : t('editor.lockRemoved'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const archive = () => {
+    if (noteId == null) return;
+    Alert.alert(t('editor.archiveConfirmTitle'), t('editor.archiveConfirmText'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('editor.archive'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await client.archiveNote(noteId);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('🪶', t('editor.archived'));
+            onSaved({ ...(note as Note) });
+            onClose();
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
   };
 
   const revokeShare = () => {
@@ -308,33 +375,65 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     }
   };
 
+  // Erinnerung: Server-Reminder + lokale Notification (funktioniert auch offline)
   const promptReminder = () => {
     if (noteId == null) return;
-    Alert.prompt(
-      t('reminder.set'),
-      t('reminder.at') + ' (HH:MM)',
-      [
+    if (serverReminder) {
+      const when = new Date(serverReminder);
+      Alert.alert('⏰ ' + t('reminder.title'), t('reminder.existing', {
+        time: isNaN(when.getTime()) ? serverReminder : when.toLocaleString(locale),
+      }), [
         { text: t('common.cancel'), style: 'cancel' },
+        { text: t('reminder.set'), onPress: () => { setPromptValue(''); setPromptKind('reminder'); } },
         {
-          text: t('common.save'),
-          onPress: async (time?: string) => {
-            const m = time?.match(/^(\d{1,2}):(\d{2})$/);
-            if (!m) return;
-            const d = new Date();
-            d.setHours(parseInt(m[1], 10), parseInt(m[2], 10), 0, 0);
-            if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+          text: t('reminder.remove'), style: 'destructive',
+          onPress: async () => {
             try {
-              await setReminder(noteId, latest.current.heading || 'Notiz', d.toISOString());
-              Alert.alert('🪶', t('reminder.saved'));
+              await client.removeNoteReminder(noteId);
+              await removeReminder(noteId);
+              setServerReminder(null);
+              Alert.alert('🪶', t('reminder.serverRemoved'));
             } catch (e: any) {
-              Alert.alert(t('common.error'), e?.message === 'no-permission' ? 'Benachrichtigungen erlauben!' : String(e?.message ?? e));
+              Alert.alert(t('common.error'), e?.message ?? String(e));
             }
           },
         },
-      ],
-      'plain-text',
-      new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
-    );
+      ]);
+      return;
+    }
+    setPromptValue('');
+    setPromptKind('reminder');
+  };
+
+  const submitReminderPrompt = async (value: string) => {
+    setPromptKind(null);
+    if (noteId == null) return;
+    // "JJJJ-MM-TT HH:MM" (Datum leer lassen = heute)
+    const m = value.trim().match(/^(?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{1,2}):(\d{2})$/);
+    if (!m) {
+      Alert.alert(t('common.error'), t('reminder.timePrompt'));
+      return;
+    }
+    const d = new Date();
+    if (m[1]) d.setFullYear(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+    d.setHours(parseInt(m[4], 10), parseInt(m[5], 10), 0, 0);
+    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+    try {
+      // Server-Erinnerung zuerst — sie funktioniert auch ohne Notification-Recht.
+      // Die lokale Notification ist Bonus (offline/ohne Server-Push) und darf scheitern.
+      await client.setNoteReminder(noteId, d.toISOString(), { message: latest.current.heading || undefined });
+      setServerReminder(d.toISOString());
+      let localWarning = false;
+      try {
+        await setReminder(noteId, latest.current.heading || 'Notiz', d.toISOString());
+      } catch { localWarning = true; }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('🪶', localWarning
+        ? `${t('reminder.serverSaved')} — ${t('reminder.localDenied')}`
+        : t('reminder.serverSaved'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), String(e?.message ?? e));
+    }
   };
 
   const shareNote = async () => {
@@ -345,7 +444,79 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       });
     } catch {}
   };
-  const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
+
+  // --- Karten-Farbe ---
+  const applyColor = async (hex: string) => {
+    if (noteId == null) return;
+    try {
+      const res = await client.setNoteColor(noteId, hex);
+      setNoteColorHex(res.color_hex ?? (hex || null));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onSaved({ ...(note as Note), color_hex: res.color_hex });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  // --- Vorlagen (nur neue Notizen) ---
+  const openTemplates = async () => {
+    try {
+      if (templates == null) {
+        const res = await client.listTemplates();
+        setTemplates(res.notes ?? []);
+      }
+      setShowTemplates(true);
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const applyTemplate = async (tpl: TemplateInfo) => {
+    setShowTemplates(false);
+    try {
+      const res = await client.getNote(tpl.id);
+      const n = res.note;
+      setHeading(n.heading ?? tpl.heading);
+      setContent(n.content ?? '');
+      setTags(n.tags ?? '');
+      setNoteType(n.type);
+      scheduleSave();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  // --- Markdown ↔ Rich-Text konvertieren ---
+  const convertType = () => {
+    if (noteId == null) return;
+    const target = noteType === 'markdown' ? 'html' : 'markdown';
+    Alert.alert(t('convert.confirmTitle'), t('convert.confirmText'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.save'),
+        onPress: async () => {
+          // Ausstehenden Autosave stoppen — sonst überschreibt er das konvertierte
+          // Ergebnis mit dem alten Inhalt (Race zwischen Timer und Server-Antwort)
+          if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+          try {
+            await client.convertNote(noteId, target);
+            // Inhalt in neuem Format nachladen
+            const res = await client.getNote(noteId);
+            setContent(res.note.content ?? '');
+            setHeading(res.note.heading ?? '');
+            setTags(res.note.tags ?? '');
+            setNoteType(res.note.type);
+            setSaveState('saved');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('🪶', t('convert.done'));
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
 
   const moveToFolder = async (targetId: number | null) => {
     setShowPicker(false);
@@ -358,11 +529,14 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       Alert.alert(t('common.error'), e?.message ?? String(e));
     }
   };
+
   const toggleFavorite = async () => {
     if (noteId == null) return;
     try {
-      await client.updateNote(noteId, { favorite: !isFavorite });
-      onSaved({ ...(note as Note), favorite: !isFavorite });
+      // POST /notes/{id}/favorite toggelt serverseitig; PATCH favorite bleibt dort wirkungslos
+      await client.toggleFavorite(noteId);
+      setFavorite((v) => !v);
+      onSaved({ ...(note as Note), favorite: !favorite });
     } catch (e: any) {
       Alert.alert(t('common.error'), e?.message ?? String(e));
     }
@@ -425,7 +599,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
               <Text style={styles.folderIcon}>↗</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={promptReminder} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={styles.folderIcon}>⏰</Text>
+              <Text style={[styles.folderIcon, serverReminder && styles.reminderActive]}>⏰</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={toggleNoteLock} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.folderIcon}>🔒</Text>
@@ -433,7 +607,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <TouchableOpacity
               onPress={toggleFavorite}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Text style={[styles.starBtn, isFavorite && styles.starActive]}>{isFavorite ? '★' : '☆'}</Text>
+              <Text style={[styles.starBtn, favorite && styles.starActive]}>{favorite ? '★' : '☆'}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={confirmDelete} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.delete}>🗑</Text>
@@ -441,7 +615,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </View>
         )}
       </View>
-      {!isNew && (
+      {!isNew ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.actionRow} contentContainerStyle={styles.actionRowContent}>
           <TouchableOpacity style={styles.actionChip} onPress={() => setShowPicker(true)}>
             <Text style={styles.actionChipIcon}>📁</Text>
@@ -459,7 +633,59 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <Text style={styles.actionChipIcon}>{shared ? '🔗' : '⛓︎'}</Text>
             <Text style={styles.actionChipText}>{shared ? t('editor.shareActive') : t('editor.shareLink')}</Text>
           </TouchableOpacity>
+          {serverLockSupported ? (
+            <TouchableOpacity style={styles.actionChip} onPress={toggleServerLock}>
+              <Text style={styles.actionChipIcon}>{serverLocked ? '🔒' : '🔓'}</Text>
+              <Text style={styles.actionChipText}>{serverLocked ? t('editor.unlock') : t('editor.lock')}</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenVersions && noteId != null ? (
+            <TouchableOpacity style={styles.actionChip} onPress={() => onOpenVersions(noteId)}>
+              <Text style={styles.actionChipIcon}>🕘</Text>
+              <Text style={styles.actionChipText}>{t('editor.versions')}</Text>
+            </TouchableOpacity>
+          ) : null}
+          {!isExcalidraw ? (
+            <TouchableOpacity style={styles.actionChip} onPress={convertType}>
+              <Text style={styles.actionChipIcon}>⇄</Text>
+              <Text style={styles.actionChipText}>{noteType === 'markdown' ? t('convert.toHtml') : t('convert.toMarkdown')}</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={[styles.actionChip, styles.actionChipDanger]} onPress={archive}>
+            <Text style={styles.actionChipIcon}>📦</Text>
+            <Text style={[styles.actionChipText, styles.actionChipTextDanger]}>{t('editor.archive')}</Text>
+          </TouchableOpacity>
+          <View style={styles.colorRow}>
+            <Text style={styles.actionChipIcon}>🎨</Text>
+            {NOTE_COLORS.map((c) => (
+              <TouchableOpacity
+                key={c}
+                style={[styles.colorDot, { backgroundColor: c }, (noteColorHex ?? '').toLowerCase() === c && styles.colorDotActive]}
+                onPress={() => applyColor(c)}
+                hitSlop={{ left: 3, right: 3, top: 3, bottom: 3 }}
+              />
+            ))}
+            {noteColorHex ? (
+              <TouchableOpacity style={[styles.colorDot, styles.colorDotNone]} onPress={() => applyColor('')} hitSlop={{ left: 3, right: 3, top: 3, bottom: 3 }}>
+                <Text style={styles.colorNoneText}>✕</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </ScrollView>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.actionRow} contentContainerStyle={styles.actionRowContent}>
+          <TouchableOpacity style={styles.actionChip} onPress={openTemplates}>
+            <Text style={styles.actionChipIcon}>📋</Text>
+            <Text style={styles.actionChipText}>{t('templates.apply')}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+      {serverLocked && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            🔒 {t('editor.locked')}
+          </Text>
+        </View>
       )}
       {drawMissing && (
         <View style={[styles.missingBanner, { backgroundColor: colors.dangerSoft }]}>
@@ -475,6 +701,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           placeholderTextColor={colors.textFaint}
           value={heading}
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
+          editable={!serverLocked}
         />
         {isExcalidraw && drawingContent ? (
           <DrawingEditor
@@ -493,6 +720,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             placeholderTextColor={colors.textFaint}
             value={content}
             onChangeText={(v) => { setContent(v); scheduleSave(); }}
+            editable={!serverLocked}
             multiline
             textAlignVertical="top"
           />
@@ -527,6 +755,24 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             </View>
           </View>
         )}
+        {!isNew && backlinks != null && backlinks.length > 0 && (
+          <View style={styles.backlinkSection}>
+            <Text style={styles.attachTitle}>🔗 {t('backlinks.title')} ({backlinks.length})</Text>
+            {backlinks.map((bl) => (
+              <TouchableOpacity
+                key={bl.id}
+                style={styles.backlinkRow}
+                activeOpacity={0.7}
+                onPress={onOpenNote ? () => onOpenNote({ id: bl.id, heading: bl.heading }) : undefined}
+              >
+                <Text style={styles.backlinkHeading} numberOfLines={1}>{bl.heading}</Text>
+                {bl.mentions && bl.mentions.length > 0 ? (
+                  <Text style={styles.backlinkPreview} numberOfLines={2}>{bl.mentions[0].preview}</Text>
+                ) : null}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </ScrollView>
       <FolderPickerSheet
         visible={showPicker}
@@ -535,6 +781,55 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         onSelect={moveToFolder}
         onClose={() => setShowPicker(false)}
       />
+      <PromptModal
+        visible={promptKind === 'pin'}
+        title={t('lock.enterPass')}
+        message="4–8 Ziffern"
+        secure
+        keyboardType="number-pad"
+        maxLength={8}
+        defaultValue={promptValue}
+        onCancel={() => setPromptKind(null)}
+        onSubmit={submitPinPrompt}
+      />
+      <PromptModal
+        visible={promptKind === 'reminder'}
+        title={t('reminder.set')}
+        message={`${t('reminder.datePrompt')} · ${t('reminder.timePrompt')}`}
+        placeholder="2026-01-31 09:00"
+        defaultValue={promptValue}
+        onCancel={() => setPromptKind(null)}
+        onSubmit={submitReminderPrompt}
+      />
+      <Modal visible={showTemplates} transparent animationType="slide" onRequestClose={() => setShowTemplates(false)}>
+        <View style={styles.backdrop}>
+          <TouchableOpacity style={styles.backdropTouch} activeOpacity={1} onPress={() => setShowTemplates(false)} />
+          <View style={[styles.sheet, shadow]}>
+            <Text style={styles.sheetTitle}>📋 {t('templates.title')}</Text>
+            {templates && templates.length > 0 ? (
+              <FlatList
+                data={templates}
+                keyExtractor={(x) => String(x.id)}
+                style={styles.tplList}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.tplRow} onPress={() => applyTemplate(item)}>
+                    <Text style={styles.tplIcon}>📄</Text>
+                    <View style={styles.tplTextWrap}>
+                      <Text style={styles.tplName} numberOfLines={1}>{item.heading}</Text>
+                      {item.folder ? <Text style={styles.tplMeta} numberOfLines={1}>{item.folder}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            ) : (
+              <Text style={styles.tplEmpty}>{t('templates.empty')}</Text>
+            )}
+            <TouchableOpacity style={styles.tplClose} onPress={() => setShowTemplates(false)}>
+              <Text style={styles.tplCloseText}>{t('common.close')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -558,10 +853,13 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.primarySoft, borderRadius: radius.pill,
     paddingHorizontal: spacing.md, paddingVertical: 7,
   },
+  actionChipDanger: { backgroundColor: colors.dangerSoft },
   actionChipIcon: { fontSize: 14 },
   actionChipText: { fontSize: 12, fontWeight: '600', color: colors.primary },
+  actionChipTextDanger: { color: colors.danger },
   starBtn: { fontSize: 22, color: colors.textFaint },
   folderIcon: { fontSize: 20 },
+  reminderActive: { color: colors.primary },
   starActive: { color: colors.star },
   delete: { fontSize: 20 },
   content: { padding: spacing.lg, paddingBottom: 60 },
@@ -575,7 +873,6 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.primarySoft, borderRadius: radius.pill,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
-  excPlaceholder: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: spacing.xl },
   attachSection: { marginTop: spacing.lg },
   attachTitle: { ...type.h2, fontSize: 14, marginBottom: spacing.sm },
   attachRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -585,4 +882,43 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   },
   attachName: { fontSize: 13, fontWeight: '600', color: colors.primary },
   attachSize: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
+  backlinkSection: { marginTop: spacing.lg },
+  backlinkRow: {
+    backgroundColor: colors.bg, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, marginBottom: spacing.sm,
+  },
+  backlinkHeading: { fontSize: 13, fontWeight: '700', color: colors.text },
+  backlinkPreview: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  colorRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.primarySoft, borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 7,
+  },
+  colorDot: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: 'transparent' },
+  colorDotActive: { borderColor: colors.text },
+  colorDotNone: { backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  colorNoneText: { fontSize: 11, color: colors.textMuted, fontWeight: '700' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(21,26,35,0.5)', justifyContent: 'flex-end' },
+  backdropTouch: { flex: 1 },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
+    paddingBottom: spacing.xl, maxHeight: '70%',
+  },
+  sheetTitle: { ...type.h2, textAlign: 'center', paddingVertical: spacing.md },
+  tplList: { paddingHorizontal: spacing.lg, maxHeight: 320 },
+  tplRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  tplIcon: { fontSize: 18 },
+  tplTextWrap: { flex: 1 },
+  tplName: { ...type.body, fontWeight: '600' },
+  tplMeta: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
+  tplEmpty: { ...type.muted, textAlign: 'center', paddingHorizontal: spacing.xl, paddingVertical: spacing.lg },
+  tplClose: {
+    alignSelf: 'center', marginTop: spacing.lg, backgroundColor: colors.primary,
+    borderRadius: radius.pill, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm,
+  },
+  tplCloseText: { color: '#fff', fontWeight: '700' },
 });

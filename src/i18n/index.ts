@@ -1,6 +1,7 @@
 import { de, TranslationKey } from './de';
 import { en } from './en';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { I18nManager } from 'react-native';
 
 export type Locale = 'de' | 'en';
 export type LocaleMode = 'auto' | Locale;
@@ -28,8 +29,10 @@ export function onLocaleChange(fn: () => void): () => void {
 
 export function getLocale(): Locale {
   if (override === 'de' || override === 'en') return override;
-  const tag = (typeof navigator !== 'undefined' && (navigator as any).language) || 'de';
-  return tag.startsWith('en') ? 'en' : 'de';
+  // React Native hat kein `navigator`-Global; die Systemsprache steht nur nativ
+  // (aus den RN-Typen entfernt, zur Laufzeit aber vorhanden).
+  const tag = (I18nManager as any).localeIdentifier || 'de';
+  return String(tag).toLowerCase().startsWith('en') ? 'en' : 'de';
 }
 
 export function getLocaleMode(): LocaleMode {

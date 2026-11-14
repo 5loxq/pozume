@@ -5,11 +5,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { usePalette, spacing, radius, typeFor, shadow,
-  Palette, loadThemeOverride, saveThemeOverride, getThemeMode, type ThemeMode,
+  Palette, saveThemeOverride, getThemeMode, type ThemeMode,
 } from '../theme';
-import { t, Locale, getLocale, getLocaleMode, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
+import { t, Locale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
-import { setAppLock, clearServer } from '../api/store';
+import { setAppLock, clearServer, getAppLock } from '../api/store';
 
 interface Props {
   client: PoznoteClient;
@@ -26,10 +26,18 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
   const [lockEnabled, setLockEnabled] = useState(false);
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const [themeMode, setThemeMode] = useState<ThemeMode>('auto');
-  const locale = getLocale();
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
 
   useEffect(() => { loadLocaleOverride().then(setLocaleMode); }, []);
   useEffect(() => { setThemeMode(getThemeMode()); }, []);
+  // Gespeicherten Lock-Zustand laden, sonst zeigt der Switch immer "aus"
+  useEffect(() => { getAppLock().then(setLockEnabled); }, []);
+  // Server-Version anzeigen (ohne X-User-ID nötig, aber der Client sendet es mit)
+  useEffect(() => {
+    client.getSystemVersion()
+      .then((r) => setServerVersion(r.current_version ?? null))
+      .catch(() => {});
+  }, [client]);
 
   const setTheme = async (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -114,9 +122,15 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
 
         <Text style={styles.section}>{t('settings.server')}</Text>
         <View style={[styles.card, shadow]}>
-          <View style={[styles.row, styles.rowLast]}>
+          <View style={[styles.row, serverVersion ? null : styles.rowLast]}>
             <Text style={[styles.rowText, styles.serverText]} numberOfLines={1}>{client.cfg.baseUrl}</Text>
           </View>
+          {serverVersion ? (
+            <View style={[styles.row, styles.rowLast]}>
+              <Text style={styles.rowText}>🪶 {t('settings.serverVersion')}</Text>
+              <Text style={styles.serverText}>v{serverVersion}</Text>
+            </View>
+          ) : null}
         </View>
 
         <TouchableOpacity style={[styles.logoutBtn, shadow]} onPress={confirmLogout}>

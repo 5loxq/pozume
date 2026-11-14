@@ -11,8 +11,12 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import AiScreen from './src/screens/AiScreen';
 import TasksScreen from './src/screens/TasksScreen';
 import LockScreen from './src/screens/LockScreen';
+import TagsScreen from './src/screens/TagsScreen';
+import VersionsScreen from './src/screens/VersionsScreen';
+import RemindersScreen from './src/screens/RemindersScreen';
+import GraphScreen from './src/screens/GraphScreen';
 import { PoznoteClient, type Note } from './src/api';
-import { loadServer, getAppLock } from './src/api/store';
+import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { loadLocaleOverride, onLocaleChange } from './src/i18n';
 import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
@@ -24,6 +28,10 @@ type Route =
   | { name: 'trash' }
   | { name: 'settings' }
   | { name: 'tagNotes'; tag: string }
+  | { name: 'tags' }
+  | { name: 'versions'; noteId: number }
+  | { name: 'reminders' }
+  | { name: 'graph' }
   | { name: 'ai' }
   | { name: 'tasks' };
 
@@ -35,6 +43,8 @@ function AppInner() {
   const [route, setRoute] = useState<Route>({ name: 'list' });
   const [, forceRender] = useState(0);
   const [allNotes, setAllNotes] = useState<Note[]>([]);
+  // Zähler für "Daten wurden geändert" — NotesListScreen lädt bei Erhöhung neu
+  const [dataVersion, setDataVersion] = useState(0);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
@@ -65,7 +75,7 @@ function AppInner() {
 
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
-    import('./src/api/store').then((m) => m.saveServer(c.cfg)).catch(() => {});
+    saveServer(c.cfg).catch(() => {});
     c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
   }, []);
 
@@ -73,11 +83,18 @@ function AppInner() {
   const createNote = useCallback(() => setRoute({ name: 'editor', note: null }), []);
   const createDrawing = useCallback(() => setRoute({ name: 'editor', note: null, drawing: true }), []);
   const closeEditor = useCallback(() => setRoute({ name: 'list' }), []);
-  const onDeleted = useCallback(() => setRoute({ name: 'list' }), []);
+  // Nach jedem Speichern/Löschen: Listen und KI-Kontext aktualisieren
+  const onSaved = useCallback(() => {
+    setDataVersion((v) => v + 1);
+    client?.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+  }, [client]);
+  const onDeleted = useCallback(() => {
+    setDataVersion((v) => v + 1);
+    setRoute({ name: 'list' });
+  }, []);
 
   const onLockToggle = useCallback((enabled: boolean) => {
-    // App-Lock-Status in store persistiert die Settings selbst; hier nur Cache aktualisieren
-    import('./src/api/store').then((m) => m.getAppLock()).then(setLocked).catch(() => {});
+    // Aktivieren sperrt die App erst beim nächsten Start; Deaktivieren entsperrt sofort.
     if (!enabled) setLocked(false);
   }, []);
 
@@ -120,7 +137,11 @@ function AppInner() {
               onOpenSettings={() => setRoute({ name: 'settings' })}
               onOpenAi={() => setRoute({ name: 'ai' })}
               onOpenTasks={() => setRoute({ name: 'tasks' })}
-              onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })} />
+              onOpenTags={() => setRoute({ name: 'tags' })}
+              onOpenReminders={() => setRoute({ name: 'reminders' })}
+              onOpenGraph={() => setRoute({ name: 'graph' })}
+              onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })}
+              refreshKey={dataVersion} />
           </View>
           <View style={{ flex: 1 }}>
             <NoteEditorScreen key={route.note?.id ?? 'new'}
@@ -128,8 +149,10 @@ function AppInner() {
               note={route.note}
               drawing={route.drawing}
               onClose={closeEditor}
-              onSaved={() => {}}
+              onSaved={onSaved}
               onDeleted={onDeleted}
+              onOpenNote={openNote}
+              onOpenVersions={(id) => setRoute({ name: 'versions', noteId: id })}
             />
           </View>
         </View>
@@ -146,9 +169,47 @@ function AppInner() {
           note={route.note}
           drawing={route.drawing}
           onClose={closeEditor}
-          onSaved={() => {}}
+          onSaved={onSaved}
           onDeleted={onDeleted}
+          onOpenNote={openNote}
+          onOpenVersions={(id) => setRoute({ name: 'versions', noteId: id })}
         />
+      </>
+    );
+  }
+
+  if (route.name === 'versions') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <VersionsScreen client={client} noteId={route.noteId} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
+  if (route.name === 'reminders') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <RemindersScreen client={client} onOpenNote={openNote} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
+  if (route.name === 'graph') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <GraphScreen client={client} onOpenNote={openNote} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
+  if (route.name === 'tags') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <TagsScreen client={client} onBack={() => setRoute({ name: 'list' })} onOpenTag={(tag) => setRoute({ name: 'tagNotes', tag })} />
       </>
     );
   }
@@ -197,6 +258,7 @@ function AppInner() {
           onOpenNote={openNote}
           onCreateNote={createNote}
           onBack={() => setRoute({ name: 'list' })}
+          refreshKey={dataVersion}
         />
       </>
     );
@@ -235,6 +297,7 @@ function AppInner() {
           onOpenNote={openNote}
           onCreateNote={createNote}
           onBack={() => setRoute({ name: 'folders' })}
+          refreshKey={dataVersion}
         />
       </>
     );
@@ -250,7 +313,11 @@ function AppInner() {
         onOpenSettings={() => setRoute({ name: 'settings' })}
         onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })}
         onOpenAi={() => setRoute({ name: 'ai' })}
-        onOpenTasks={() => setRoute({ name: 'tasks' })} />
+        onOpenTasks={() => setRoute({ name: 'tasks' })}
+        onOpenTags={() => setRoute({ name: 'tags' })}
+        onOpenReminders={() => setRoute({ name: 'reminders' })}
+        onOpenGraph={() => setRoute({ name: 'graph' })}
+        refreshKey={dataVersion} />
     </>
   );
 }

@@ -19,7 +19,7 @@ interface Props {
   onBack: () => void;
 }
 
-export default function AiScreen({ client, notes, onBack }: Props) {
+export default function AiScreen({ notes, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);

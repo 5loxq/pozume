@@ -1,6 +1,7 @@
 /**
  * Poznote REST API Client.
  * Auth: HTTP Basic + X-User-ID header.
+ * Doku: docs/API-REST.md im Poznote-Repository (github.com/timothepoznanski/poznote).
  */
 export interface PoznoteConfig {
   baseUrl: string;
@@ -19,18 +20,125 @@ export interface Note {
   pinned?: boolean;
   updated_at?: string;
   type?: string;
+  locked?: boolean;
+  workspace?: string;
+  color?: string | null;
+  color_hex?: string | null;
+}
+
+export interface GraphNode {
+  id: number;
+  title: string;
+  folder?: string | null;
+  folder_id?: number | null;
+  type?: string;
+  favorite?: boolean;
+  tags?: string[];
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: Array<{ source: number; target: number }>;
+  folders: Array<{ id: number; name: string; parent_id?: number | null }>;
+  total?: number;
+}
+
+export interface TemplateInfo {
+  id: number;
+  heading: string;
+  type?: string;
+  workspace?: string;
+  folder_id?: number;
+  folder?: string;
+}
+
+export interface Backlink {
+  id: number;
+  heading: string;
+  workspace?: string;
+  mentions?: Array<{ text: string; preview: string; label: string }>;
+}
+
+export interface SnapshotInfo {
+  snapshot_key: string;
+  date: string;
+  heading: string;
+  tags?: string | null;
+  type?: string;
+  manual?: boolean;
+  origin?: string;
+  created_at?: string;
+  content_hash?: string;
+  size?: number;
+}
+
+export interface ReminderRow {
+  id: number;
+  state?: 'fired' | 'upcoming';
+  note_id?: number;
+  note_heading?: string | null;
+  workspace?: string;
+  message?: string;
+  trigger_at?: string;
+  recurrence?: string | null;
+  is_read?: boolean;
+  task_id?: string | null;
 }
 
 export class PoznoteError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+/**
+ * Server-Datum ("YYYY-MM-DD HH:MM:SS", UTC) in ein für Date() sicheres ISO-Format
+ * überführen. Bereits ISO-formatierte Strings bleiben unverändert (kein doppeltes "Z").
+ */
+function toIsoDateTime(s: string | undefined | null): string | undefined {
+  if (typeof s !== 'string') return s as undefined;
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? s.replace(' ', 'T') + 'Z' : s;
+}
+
+/**
+ * Server-Notiz in das App-Format überführen.
+ * Der Server liefert `updated` statt `updated_at` und `favorite` als 0/1 statt boolean.
+ */
+function normalizeNote(raw: any): Note {
+  return {
+    ...raw,
+    updated_at: toIsoDateTime(raw?.updated ?? raw?.updated_at),
+    favorite: !!raw?.favorite,
+    pinned: !!raw?.pinned,
+  };
+}
+
+/** UTF-8-sicheres Base64 (btoa wirft bei Zeichen außerhalb Latin-1, z.B. Umlaut-Passwörtern) */
+function base64Encode(s: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let cp = s.codePointAt(i)!;
+    if (cp > 0xffff) i++; // Surrogatpaar verbraucht zwei Code-Einheiten
+    if (cp < 0x80) bytes.push(cp);
+    else if (cp < 0x800) bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    else if (cp < 0x10000) bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    else bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+  }
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 export class PoznoteClient {
   constructor(public cfg: PoznoteConfig) {}
 
-  private authHeader(): string {
-    const raw = `${this.cfg.username}:${this.cfg.password}`;
-    return 'Basic ' + btoa(raw);
+  /** Auth-Header für rohe fetch-Aufrufe (Attachments etc.) */
+  authHeaders(): Record<string, string> {
+    return {
+      Authorization: 'Basic ' + base64Encode(`${this.cfg.username}:${this.cfg.password}`),
+      'X-User-ID': this.cfg.userId ?? '1',
+    };
   }
 
   private async req<T>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
@@ -44,8 +152,7 @@ export class PoznoteClient {
         ...init,
         signal: controller.signal,
         headers: {
-          Authorization: this.authHeader(),
-          'X-User-ID': this.cfg.userId ?? '1',
+          ...this.authHeaders(),
           'Content-Type': 'application/json',
           ...(init.headers ?? {}),
         },
@@ -70,15 +177,17 @@ export class PoznoteClient {
   }
 
   // --- Notes ---
-  listNotes(params: { folder_id?: number; tag?: string; search?: string } = {}) {
+  async listNotes(params: { folder_id?: number; tags?: string; search?: string; workspace?: string; favorite?: boolean } = {}) {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]),
     ).toString();
-    return this.req<{ notes: Note[] }>(`/notes${qs ? `?${qs}` : ''}`);
+    const res = await this.req<{ notes: Note[] }>(`/notes${qs ? `?${qs}` : ''}`);
+    return { notes: (res.notes ?? []).map(normalizeNote) };
   }
 
-  getNote(id: number) {
-    return this.req<{ note: Note }>(`/notes/${id}`);
+  async getNote(id: number) {
+    const res = await this.req<{ note: Note }>(`/notes/${id}`);
+    return { note: normalizeNote(res.note) };
   }
 
   createNote(input: { heading: string; content: string; type?: string; folder_id?: number; tags?: string; workspace?: string }) {
@@ -101,13 +210,126 @@ export class PoznoteClient {
     return this.req<{ success: boolean }>(`/notes/${id}/pinned`, { method: 'PUT', body: JSON.stringify({ pinned }) });
   }
 
-  // --- Sharing ---
-  getShare(id: number) {
-    return this.req<{ shared: boolean; url?: string; token?: string }>(`/notes/${id}/share`);
+  toggleFavorite(id: number) {
+    return this.req<{ success: boolean }>(`/notes/${id}/favorite`, { method: 'POST' });
   }
 
-  shareNote(id: number, opts: { theme?: string; indexable?: boolean; access_mode?: string } = {}) {
-    return this.req<{ success: boolean; url?: string; token?: string; share_url?: string }>(`/notes/${id}/share`, { method: 'POST', body: JSON.stringify({ indexable: false, ...opts }) });
+  /** Serverseitiger Schreibschutz für Titel+Text (PUT /notes/{id}/locked) */
+  setNoteLocked(id: number, locked: boolean) {
+    return this.req<{ success: boolean }>(`/notes/${id}/locked`, { method: 'PUT', body: JSON.stringify({ locked }) });
+  }
+
+  /** Notiz ins Archives-Workspace verschieben */
+  archiveNote(id: number) {
+    return this.req<{ success: boolean }>(`/notes/${id}/archive`, { method: 'POST' });
+  }
+
+  /** Karten-Farbe der Notiz (Palette-ID oder Hex, leerer String entfernt sie) */
+  setNoteColor(id: number, color: string) {
+    return this.req<{ success: boolean; color: string | null; color_hex: string | null }>(`/notes/${id}/color`, { method: 'PUT', body: JSON.stringify({ color }) });
+  }
+
+  /** Zwischen Markdown und HTML (Rich-Text) konvertieren */
+  convertNote(id: number, target: 'markdown' | 'html') {
+    return this.req<{ success: boolean; type: string }>(`/notes/${id}/convert`, { method: 'POST', body: JSON.stringify({ target }) });
+  }
+
+  /** Vorlagen (Notizen in einem "Templates"-Ordner/-Workspace) */
+  listTemplates(workspace?: string) {
+    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    return this.req<{ notes: TemplateInfo[]; count?: number }>(`/notes/templates${qs}`);
+  }
+
+  /** Serverseitige Volltextsuche (ignoriert Groß-/Kleinschreibung und Akzente) */
+  async searchNotes(q: string, opts: { limit?: number; mode?: 'all' | 'any' | 'phrase'; workspace?: string; tags?: string } = {}) {
+    const qs = new URLSearchParams({ q, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])) });
+    const res = await this.req<{ results?: any[]; notes?: any[] }>(`/notes/search?${qs.toString()}`);
+    // Server antwortet mit `results` (inkl. excerpt); `notes` als Fallback für ältere Versionen
+    const list: any[] = res.results ?? res.notes ?? [];
+    return { notes: list.map((n) => normalizeNote({ ...n, content: n.content ?? n.excerpt })) };
+  }
+
+  // --- Backlinks ---
+  getBacklinks(id: number) {
+    return this.req<{ backlinks: Backlink[]; count: number }>(`/notes/${id}/backlinks?context=1`);
+  }
+
+  // --- Snapshots (Versionen) ---
+  listSnapshots(id: number) {
+    return this.req<{ snapshots: SnapshotInfo[]; current_hash?: string; current_heading?: string; current_tags?: string }>(`/notes/${id}/snapshots`);
+  }
+
+  getSnapshot(id: number, snapshotKey: string) {
+    return this.req<{ snapshot: { content?: string; heading?: string; tags?: string | null } }>(`/notes/${id}/snapshot?snapshot_key=${encodeURIComponent(snapshotKey)}`);
+  }
+
+  createSnapshot(id: number, manual = true) {
+    return this.req<{ success: boolean }>(`/notes/${id}/snapshot?manual=${manual ? '1' : '0'}`, { method: 'POST' });
+  }
+
+  restoreSnapshot(id: number, snapshotKey: string, meta = true) {
+    return this.req<{ success: boolean; heading?: string | null; tags?: string | null }>(
+      `/notes/${id}/snapshot/restore?snapshot_key=${encodeURIComponent(snapshotKey)}&meta=${meta ? '1' : '0'}`,
+      { method: 'POST' },
+    );
+  }
+
+  // --- Server-Reminders ---
+  async getNoteReminder(id: number) {
+    // Antwort ist flach: { reminder_at, message, recurrence } bzw. reminder_at: null
+    const res = await this.req<{ reminder_at?: string | null; message?: string; recurrence?: string | null }>(`/notes/${id}/reminder`);
+    return { reminder: res.reminder_at != null ? { reminder_at: res.reminder_at, message: res.message, recurrence: res.recurrence } : null };
+  }
+
+  setNoteReminder(id: number, reminderAtIso: string, opts: { message?: string; recurrence?: string } = {}) {
+    return this.req<{ success: boolean }>(`/notes/${id}/reminder`, { method: 'POST', body: JSON.stringify({ reminder_at: reminderAtIso, ...opts }) });
+  }
+
+  removeNoteReminder(id: number) {
+    return this.req<{ success: boolean }>(`/notes/${id}/reminder`, { method: 'DELETE' });
+  }
+
+  async listReminders(scope: 'fired' | 'upcoming' | 'all' = 'all', limit = 100) {
+    // Server antwortet mit `notifications` (nicht `reminders`)
+    const res = await this.req<{ notifications?: ReminderRow[]; reminders?: ReminderRow[]; unread_count?: number; total_count?: number; upcoming_count?: number }>(`/reminders?scope=${scope}&limit=${limit}`);
+    return {
+      reminders: (res.notifications ?? res.reminders ?? []).map((r) => ({ ...r, trigger_at: toIsoDateTime(r.trigger_at) })),
+      unread_count: res.unread_count,
+      total_count: res.total_count,
+      upcoming_count: res.upcoming_count,
+    };
+  }
+
+  markReminderRead(id: number) {
+    return this.req<{ success: boolean }>(`/reminders/${id}/read`, { method: 'POST' });
+  }
+
+  dismissReminder(id: number) {
+    return this.req<{ success: boolean }>(`/reminders/${id}/dismiss`, { method: 'POST' });
+  }
+
+  dismissAllReminders() {
+    return this.req<{ success: boolean }>('/reminders/dismiss-all', { method: 'POST' });
+  }
+
+  // --- Graph ---
+  getGraph(workspace?: string) {
+    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    return this.req<GraphData>(`/graph${qs}`);
+  }
+
+  // --- Sharing ---
+  getShare(id: number) {
+    // Server meldet den Status als `public` (nicht `shared`)
+    return this.req<{ public?: boolean; shared?: boolean; url?: string; token?: string }>(`/notes/${id}/share`);
+  }
+
+  async shareNote(id: number, opts: { theme?: string; indexable?: boolean; access_mode?: string } = {}) {
+    const res = await this.req<{ success: boolean; url?: string; token?: string; share_url?: string }>(`/notes/${id}/share`, { method: 'POST', body: JSON.stringify({ indexable: false, ...opts }) });
+    // Der Server liefert ein protokoll-relatives URL ("//host/token") — für Share/Clipboard absolut machen
+    let url = res.url ?? res.share_url ?? (res.token ? `${this.cfg.baseUrl}/${res.token}` : undefined);
+    if (url && url.startsWith('//')) url = `https:${url}`;
+    return { ...res, url };
   }
 
   revokeShare(id: number) {
@@ -115,9 +337,12 @@ export class PoznoteClient {
   }
 
   // --- Tasks (serverseitige Tasklisten) ---
-  listTasks(workspace?: string) {
+  async listTasks(workspace?: string) {
     const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
-    return this.req<{ notes: Array<{ id: number; heading: string; folder?: string; tasks: Array<{ id: number; text: string; completed: boolean; dueAt?: string | null }> }> }>(`/tasks${qs}`);
+    // Server liefert Tasklisten teils unter `checklists`, teils unter `notes` — beides zusammenführen
+    const res = await this.req<{ notes?: unknown[]; checklists?: unknown[] }>(`/tasks${qs}`);
+    const list = [...(res.notes ?? []), ...(res.checklists ?? [])] as Array<{ id: number; heading: string; folder?: string; tasks: Array<{ id: number; text: string; completed: boolean; dueAt?: string | null }> }>;
+    return { notes: list };
   }
 
   updateTask(noteId: number, taskId: number, patch: { completed?: boolean; text?: string; priority?: string | null }) {
@@ -129,9 +354,27 @@ export class PoznoteClient {
     return this.req<{ workspaces: Array<{ name: string; color?: string | null }> }>('/workspaces');
   }
 
+  // --- Tags ---
+  async listTags(workspace?: string) {
+    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    // Server liefert ein reines String-Array; Objekte mit count als Fallback
+    const res = await this.req<{ tags: Array<string | { tag: string; count?: number }> }>(`/tags${qs}`);
+    return { tags: (res.tags ?? []).map((x) => (typeof x === 'string' ? { tag: x } : x)) };
+  }
+
+  renameTag(tag: string, newName: string, workspace?: string) {
+    return this.req<{ success: boolean }>(`/tags/${encodeURIComponent(tag)}`, { method: 'PATCH', body: JSON.stringify({ new_name: newName, ...(workspace ? { workspace } : {}) }) });
+  }
+
+  deleteTag(tag: string, workspace?: string) {
+    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    return this.req<{ success: boolean }>(`/tags/${encodeURIComponent(tag)}${qs}`, { method: 'DELETE' });
+  }
+
   // --- Trash ---
-  listTrash() {
-    return this.req<{ notes: Note[] }>('/trash');
+  async listTrash() {
+    const res = await this.req<{ notes: Note[] }>('/trash');
+    return { notes: (res.notes ?? []).map(normalizeNote) };
   }
 
   restoreNote(id: number) {
@@ -153,11 +396,39 @@ export class PoznoteClient {
   }
 
   createFolder(name: string, workspace?: string) {
-    return this.req<{ id: number }>('/folders', { method: 'POST', body: JSON.stringify({ name, ...(workspace ? { workspace } : {}) }) });
+    return this.req<{ id?: number; folder_id?: number; folder?: { id: number; name: string } }>('/folders', { method: 'POST', body: JSON.stringify({ name, ...(workspace ? { workspace } : {}) }) });
+  }
+
+  /** Ordner samt Unterordnern löschen (Server legt ein Restore-Snapshot an) */
+  deleteFolder(id: number) {
+    return this.req<{ success: boolean }>(`/folders/${id}`, { method: 'DELETE' });
+  }
+
+  // --- System ---
+  getSystemVersion() {
+    return this.req<{ current_version?: string; latest_version?: string; is_up_to_date?: boolean }>('/system/version');
   }
 
   // --- Attachments ---
   listAttachments(noteId: number) {
     return this.req<{ attachments: Array<{ id: string; filename: string; original_filename?: string; file_size?: number; file_type?: string; uploaded_at?: string }> }>(`/notes/${noteId}/attachments`);
+  }
+
+  /** Anhang als Text roh laden (z.B. SVG-Zeichnungen) */
+  async getAttachmentText(noteId: number, attachmentId: string): Promise<string> {
+    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    return res.text();
+  }
+
+  /** Anhang als Bytes laden (für Teilen/Speichern) */
+  async getAttachmentBytes(noteId: number, attachmentId: string): Promise<Uint8Array> {
+    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
   }
 }

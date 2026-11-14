@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, RefreshControl, ActivityIndicator, Alert,
@@ -13,6 +13,8 @@ import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
 import { readCachedNotes, cacheNotes } from '../api/cache';
+import { readDrawingCache, writeDrawingCache } from '../api/drawCache';
+import { isDrawingContent } from '../components/DrawingEditor';
 
 interface Props {
   client: PoznoteClient;
@@ -27,15 +29,20 @@ interface Props {
   onOpenSettings?: () => void;
   onOpenAi?: () => void;
   onOpenTasks?: () => void;
+  onOpenTags?: () => void;
+  onOpenReminders?: () => void;
+  onOpenGraph?: () => void;
   tag?: string;
-  onBackFromTag?: () => void;
   onTagPress?: (tag: string) => void;
+  /** Erhöht sich, wenn sich Daten geändert haben (z.B. nach dem Speichern im Editor) */
+  refreshKey?: number;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCreateDrawing, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, tag, onBackFromTag, onTagPress }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCreateDrawing, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, onOpenTags, onOpenReminders, onOpenGraph, tag, onTagPress, refreshKey }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -45,6 +52,8 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const [showFavorites, setShowFavorites] = useState(false);
   const [sortBy, setSortBy] = useState<'updated' | 'created' | 'title'>('updated');
   const [menuNote, setMenuNote] = useState<Note | null>(null);
+  // Zeichnungsinhalte für Karten-Vorschauen (noteId -> Inhalt), aus Cache + Hintergrund-Nachladen
+  const [drawings, setDrawings] = useState<Record<number, string>>({});
 
   const showNoteMenu = (n: Note) => setMenuNote(n);
 
@@ -77,9 +86,18 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     if (!opts.silent) setLoading(true);
     setError(null);
     try {
-      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(tag ? { tag } : {}) });
-      setNotes(res.notes ?? []);
-      cacheNotes(res.notes ?? []).catch(() => {});
+      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(tag ? { tags: tag } : {}) });
+      let list = res.notes ?? [];
+      // Der Server ignoriert den tags-Parameter je nach Version — deshalb zusätzlich lokal filtern
+      if (tag) {
+        const wanted = tag.toLowerCase();
+        list = list.filter((n) =>
+          (n.tags ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(wanted));
+      }
+      setNotes(list);
+      // Nur die ungefilterte Gesamtliste cachen — Teilmenge würden beim nächsten Boot
+      // fälschlich als "alle Notizen" erscheinen.
+      if (folderId == null && !tag) cacheNotes(list).catch(() => {});
     } catch (e: any) {
       // Offline: Cache zeigen statt harter Fehler
       const cached = await readCachedNotes<Note[]>();
@@ -92,7 +110,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       setLoading(false);
       setRefreshing(false);
     }
-  }, [client, folderId]);
+  }, [client, folderId, tag]);
 
   // Boot: sofort Cache zeigen, dann live aktualisieren
   useEffect(() => {
@@ -111,25 +129,93 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
 
   useEffect(() => { load(); }, [load]);
 
+  // Server-Volltextsuche ab 3 Zeichen (findet auch Inhalte, die nicht geladen sind);
+  // darunter lokales Filtern der geladenen Liste.
+  const usedServerSearch = useRef(false);
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 3) {
+      // Suche verlassen: Basisliste wiederherstellen
+      if (usedServerSearch.current) {
+        usedServerSearch.current = false;
+        load({ silent: true });
+      }
+      return;
+    }
+    if (folderId != null || tag) return;
+    let cancelled = false;
+    usedServerSearch.current = true;
+    setLoading(true);
+    client.searchNotes(q, { limit: 50 })
+      .then((res) => { if (!cancelled) setNotes(res.notes ?? []); })
+      .catch(() => { if (!cancelled) load({ silent: true }); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [searchQuery, client, folderId, tag, load]);
+
+  // Nach Änderungen (z.B. Speichern im Editor) still neu laden — außer eine
+  // Server-Suche ist aktiv: deren Ergebnis würde sonst durch die volle Liste ersetzt.
+  useEffect(() => {
+    if (refreshKey == null || refreshKey === 0) return;
+    if (searchQuery.trim().length >= 3) return;
+    load({ silent: true });
+  }, [refreshKey, load, searchQuery]);
+
+  // Zeichnungsinhalte im Hintergrund synchronisieren: Cache zeigen, und nur Notizen
+  // nachladen, deren Inhalt noch nicht (oder nicht mehr aktuell) gecacht ist.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cache = await readDrawingCache();
+      const fresh: Record<number, string> = {};
+      const stale: Note[] = [];
+      for (const n of notes) {
+        const entry = cache[n.id];
+        if (entry && entry.u === (n.updated_at ?? '')) fresh[n.id] = entry.c;
+        else stale.push(n);
+      }
+      if (!cancelled) setDrawings(fresh);
+      if (stale.length === 0) return;
+      const details = await Promise.all(
+        stale.slice(0, 60).map((n) => client.getNote(n.id).catch(() => null)),
+      );
+      details.forEach((r, i) => {
+        const n = stale[i];
+        const content = r?.note?.content;
+        if (content && isDrawingContent(content)) {
+          cache[n.id] = { u: n.updated_at ?? '', c: content };
+          fresh[n.id] = content;
+        } else {
+          delete cache[n.id];
+        }
+      });
+      writeDrawingCache(cache);
+      if (!cancelled) setDrawings({ ...fresh });
+    })();
+    return () => { cancelled = true; };
+  }, [notes, client]);
+
   const visible = useMemo(() => {
     let out = notes;
     if (showFavorites) out = out.filter((n) => n.favorite);
     const q = searchQuery.trim().toLowerCase();
-    if (q) {
+    if (q && q.length < 3) {
       out = out.filter((n) =>
         (n.heading ?? '').toLowerCase().includes(q) ||
         (n.content ?? '').toLowerCase().includes(q));
     }
+    // Kopie sortieren — der State-Array selbst darf nicht mutiert werden
+    const sorted = [...out];
     if (sortBy === 'title') {
-      out.sort((a, b) => (a.heading ?? '').localeCompare(b.heading ?? '', locale));
+      sorted.sort((a, b) => (a.heading ?? '').localeCompare(b.heading ?? '', locale));
     } else if (sortBy === 'created') {
-      out.sort((a, b) => new Date(a.updated_at ?? 0).getTime() - new Date(b.updated_at ?? 0).getTime());
+      sorted.sort((a, b) => new Date(a.updated_at ?? 0).getTime() - new Date(b.updated_at ?? 0).getTime());
     } else {
-      out.sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
+      sorted.sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
     }
     // Angepinnte Notizen immer nach oben (stabil, Sortierung bleibt innerhalb der Gruppen)
-    return [...out.filter((n) => n.pinned), ...out.filter((n) => !n.pinned)];
-  }, [notes, search, showFavorites, sortBy, locale]);
+    return [...sorted.filter((n) => n.pinned), ...sorted.filter((n) => !n.pinned)];
+  }, [notes, searchQuery, showFavorites, sortBy, locale]);
 
   const renderHeader = () => (
     <View style={styles.header}>
@@ -159,6 +245,21 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
           {onOpenTasks ? (
             <TouchableOpacity style={styles.folderBtn} onPress={onOpenTasks}>
               <Text style={styles.folderBtnText}>☑️</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenTags ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenTags}>
+              <Text style={styles.folderBtnText}>🏷</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenReminders ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenReminders}>
+              <Text style={styles.folderBtnText}>🔔</Text>
+            </TouchableOpacity>
+          ) : null}
+          {onOpenGraph ? (
+            <TouchableOpacity style={styles.folderBtn} onPress={onOpenGraph}>
+              <Text style={styles.folderBtnText}>🕸</Text>
             </TouchableOpacity>
           ) : null}
           {onOpenAi ? (
@@ -258,7 +359,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         data={visible}
         keyExtractor={(n) => String(n.id)}
         renderItem={({ item }) => (
-          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} onLongPress={showNoteMenu} />
+          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} onLongPress={showNoteMenu} drawingContent={drawings[item.id]} />
         )}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, typeFor, shadow, shadowSoft, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadowSoft, primaryButton,
   Palette,
 } from '../theme';
 import { t } from '../i18n';

@@ -12,7 +12,8 @@ Notifications.setNotificationHandler({
 });
 
 const KEY = 'pozume.reminders.v1';
-type Map = Record<number, string>; // noteId -> ISO-Zeit
+/** noteId -> { when: ISO-Zeit, notificationId: geplante Notification } */
+type Map = Record<number, { when: string; notificationId: string }>;
 
 async function readAll(): Promise<Map> {
   const raw = await AsyncStorage.getItem(KEY);
@@ -27,22 +28,28 @@ async function writeAll(m: Map): Promise<void> {
 export async function setReminder(noteId: number, title: string, whenIso: string): Promise<void> {
   const { status } = await Notifications.requestPermissionsAsync();
   if (status !== 'granted') throw new Error('no-permission');
-  await Notifications.scheduleNotificationAsync({
+  // Alte Notification der Notiz zuerst canceln, sonst feuern beide
+  await removeReminder(noteId);
+  const notificationId = await Notifications.scheduleNotificationAsync({
     content: { title: '🪶 Pozume', body: `Erinnerung: ${title}` },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(whenIso) } as any,
   });
   const m = await readAll();
-  m[noteId] = whenIso;
+  m[noteId] = { when: whenIso, notificationId };
   await writeAll(m);
 }
 
 export async function removeReminder(noteId: number): Promise<void> {
   const m = await readAll();
+  const entry = m[noteId];
+  if (entry?.notificationId) {
+    await Notifications.cancelScheduledNotificationAsync(entry.notificationId).catch(() => {});
+  }
   delete m[noteId];
   await writeAll(m);
 }
 
 export async function getReminder(noteId: number): Promise<string | null> {
   const m = await readAll();
-  return m[noteId] ?? null;
+  return m[noteId]?.when ?? null;
 }
