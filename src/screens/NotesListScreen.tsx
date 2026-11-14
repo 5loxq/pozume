@@ -234,6 +234,8 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}
         contentContainerStyle={styles.listContent}
+        windowSize={11}
+        maxToRenderPerBatch={10}
         refreshControl={
           <RefreshControl refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); load({ silent: true }); }} />

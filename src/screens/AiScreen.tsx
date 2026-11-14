@@ -73,7 +73,7 @@ export default function AiScreen({ client, notes, onBack }: Props) {
     try {
       const reply = await aiChat(cfg, [
         { role: 'system', content: 'Du bist der Pozume-KI-Assistent und hilfst beim Verwalten persönlicher Poznote-Notizen. Antworte präzise und auf Deutsch, es sei denn, die Frage ist auf Englisch.' },
-        ...messages.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+        ...messages.slice(-10).map((m) => ({ role: m.role, content: m.content.slice(0, 4000) })),
         { ...userMsg, content: userMsg.content + noteContext() },
       ]);
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
