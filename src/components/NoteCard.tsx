@@ -15,9 +15,10 @@ interface Props {
   locale: string;
   onPress: (note: Note) => void;
   onTagPress?: (tag: string) => void;
+  onLongPress?: (note: Note) => void;
 }
 
-export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
+export default function NoteCard({ note, locale, onPress, onTagPress, onLongPress }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -28,7 +29,7 @@ export default function NoteCard({ note, locale, onPress, onTagPress }: Props) {
       <View style={styles.headerRow}>
         {note.pinned ? <Text style={styles.pin}>📌</Text> : null}
         <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
-        {note.favorite ? <Text style={styles.star}>★</Text> : null}
+        <Text style={styles.icons}>{(note.pinned ? '📌' : '') + (note.favorite ? ' ★' : '')}</Text>
       </View>
       {note.type === 'excalidraw' || isDrawingContent(note.content) ? (
         <Text style={styles.excerpt} numberOfLines={1}>🎨 {t('list.excalidraw')}</Text>
@@ -65,7 +66,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
   pin: { fontSize: 13, marginRight: spacing.sm, marginTop: 2 },
   title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
-  star: { color: colors.star, fontSize: 18, marginLeft: spacing.sm },
+  icons: { fontSize: 15, marginLeft: spacing.sm },
   excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 20 },
   footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, gap: 6 },
   tag: {

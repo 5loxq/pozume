@@ -4,6 +4,8 @@ import {
   StyleSheet, RefreshControl, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Modal, Share } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { usePalette, spacing, radius, typeFor, shadow, shadowSoft, greetingForHour,
   Palette,
 } from '../theme';
@@ -42,6 +44,33 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const [searchQuery, setSearchQuery] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
   const [sortBy, setSortBy] = useState<'updated' | 'created' | 'title'>('updated');
+  const [menuNote, setMenuNote] = useState<Note | null>(null);
+
+  const showNoteMenu = (n: Note) => setMenuNote(n);
+
+  const menuAction = async (action: 'pin' | 'duplicate' | 'share') => {
+    const n = menuNote;
+    setMenuNote(null);
+    if (!n) return;
+    try {
+      if (action === 'pin') {
+        await client.setPinned(n.id, !n.pinned);
+        load({ silent: true });
+      } else if (action === 'duplicate') {
+        await client.duplicateNote(n.id);
+        load({ silent: true });
+      } else if (action === 'share') {
+        const res = await client.shareNote(n.id);
+        const url = (res as any).share_url ?? (res as any).url;
+        if (url) {
+          await Share.share({ title: n.heading, message: url });
+        }
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
   const locale = getLocale();
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
@@ -229,7 +258,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         data={visible}
         keyExtractor={(n) => String(n.id)}
         renderItem={({ item }) => (
-          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} />
+          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} onLongPress={showNoteMenu} />
         )}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}
@@ -246,6 +275,22 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
           <Text style={styles.fabDrawText}>🎨</Text>
         </TouchableOpacity>
       ) : null}
+      <Modal visible={menuNote != null} transparent animationType="fade" onRequestClose={() => setMenuNote(null)}>
+        <TouchableOpacity style={styles.menuBackdrop} activeOpacity={1} onPress={() => setMenuNote(null)}>
+          <View style={[styles.menuSheet, shadow]}>
+            <Text style={[styles.menuTitle, { color: colors.text }]} numberOfLines={1}>{menuNote?.heading}</Text>
+            <TouchableOpacity style={styles.menuItem} onPress={() => menuAction('pin')}>
+              <Text style={styles.menuItemText}>📌 {menuNote?.pinned ? t('menu.unpin') : t('menu.pin')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={() => menuAction('duplicate')}>
+              <Text style={styles.menuItemText}>⧉ {t('menu.duplicate')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => menuAction('share')}>
+              <Text style={styles.menuItemText}>🔗 {t('menu.shareLink')}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
       <TouchableOpacity style={[styles.fab, shadow]} onPress={onCreateNote} activeOpacity={0.85}>
         <Text style={styles.fabText}>＋</Text>
       </TouchableOpacity>
@@ -254,6 +299,12 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
 }
 
 const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
+  menuBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, paddingBottom: spacing.xxl },
+  menuTitle: { ...type.h2, padding: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border },
+  menuItem: { paddingVertical: spacing.md, paddingHorizontal: spacing.xl, borderBottomWidth: 1, borderBottomColor: colors.border },
+  menuItemLast: { borderBottomWidth: 0 },
+  menuItemText: { ...type.body, fontSize: 16 },
   safe: { flex: 1, backgroundColor: colors.bg },
   listContent: { padding: spacing.lg, paddingBottom: 100 },
   header: { marginBottom: spacing.lg },
