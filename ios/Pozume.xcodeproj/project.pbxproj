@@ -7,16 +7,65 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A6016C2DCC9AD95BEEA785C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AB0D842DFE104B478174337 /* ShareViewController.swift */; };
+		0D3A795DCE029768E367B39F /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CB8AF3149F8A0130D6003127 /* Foundation.framework */; };
 		13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB01A68108700A75B9A /* AppDelegate.mm */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		13B07FC11A68108700A75B9A /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB71A68108700A75B9A /* main.m */; };
+		191B91349A3A122CFB6F17BC /* PozumeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267FCAFCCC636DF0F7958BDB /* PozumeWidget.swift */; };
 		2856B6853E884237B6DBED66 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE8AE83E8AA442DAB36BBC39 /* noop-file.swift */; };
+		308A77E54A53F7CB00DAF23D /* PozumeShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4B48CB4C48A38F03682E24D1 /* PozumeShare.appex */; };
+		3DBEC49A42BE13FDEFBA28C5 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15234B3C3654B61D7C6F6E7F /* WidgetKit.framework */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		544ABA0425EB918B67F9A42D /* PozumeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 89ACFCEB72660C3ACED8956A /* PozumeWidget.appex */; };
+		7F5FD778E1649F01A83698BF /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CB8AF3149F8A0130D6003127 /* Foundation.framework */; };
 		96905EF65AED1B983A6B3ABC /* libPods-Pozume.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 58EEBF8E8E6FB1BC6CAF49B5 /* libPods-Pozume.a */; };
 		B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		C4379527CF76BEB00659AE74 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 18C66DF8114778BDCA88DF5C /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		614DA4F1A3956CFBC3ED9445 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 75D0F739E8FAA05186B6CE74;
+			remoteInfo = PozumeShare;
+		};
+		63CFB902A97FF751E41355C6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0F14A5E899C9D6B307C541DA;
+			remoteInfo = PozumeWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AFDC6DD4C4495FED7A06C0A0 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				308A77E54A53F7CB00DAF23D /* PozumeShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F291DF56D9205646CC4F3E95 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				544ABA0425EB918B67F9A42D /* PozumeWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* Pozume.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pozume.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -25,13 +74,19 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Pozume/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Pozume/Info.plist; sourceTree = "<group>"; };
 		13B07FB71A68108700A75B9A /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = main.m; path = Pozume/main.m; sourceTree = "<group>"; };
+		15234B3C3654B61D7C6F6E7F /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/WidgetKit.framework; sourceTree = DEVELOPER_DIR; };
 		18C66DF8114778BDCA88DF5C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Pozume/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		267FCAFCCC636DF0F7958BDB /* PozumeWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PozumeWidget.swift; sourceTree = "<group>"; };
 		394C6143EADF4C74A4A24629 /* Pozume-Bridging-Header.h */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "Pozume-Bridging-Header.h"; path = "Pozume/Pozume-Bridging-Header.h"; sourceTree = "<group>"; };
+		3AB0D842DFE104B478174337 /* ShareViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		4B48CB4C48A38F03682E24D1 /* PozumeShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PozumeShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		58EEBF8E8E6FB1BC6CAF49B5 /* libPods-Pozume.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Pozume.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C2E3173556A471DD304B334 /* Pods-Pozume.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Pozume.debug.xcconfig"; path = "Target Support Files/Pods-Pozume/Pods-Pozume.debug.xcconfig"; sourceTree = "<group>"; };
 		7A4D352CD337FB3A3BF06240 /* Pods-Pozume.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Pozume.release.xcconfig"; path = "Target Support Files/Pods-Pozume/Pods-Pozume.release.xcconfig"; sourceTree = "<group>"; };
+		89ACFCEB72660C3ACED8956A /* PozumeWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PozumeWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Pozume/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		CB8AF3149F8A0130D6003127 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Pozume/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		FE8AE83E8AA442DAB36BBC39 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "Pozume/noop-file.swift"; sourceTree = "<group>"; };
@@ -43,6 +98,23 @@
 			buildActionMask = 2147483647;
 			files = (
 				96905EF65AED1B983A6B3ABC /* libPods-Pozume.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2D96BEEE0F3F81B1A7EB58BC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F5FD778E1649F01A83698BF /* Foundation.framework in Frameworks */,
+				3DBEC49A42BE13FDEFBA28C5 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		602200A961318FB69CC76FB8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0D3A795DCE029768E367B39F /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +143,7 @@
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				58EEBF8E8E6FB1BC6CAF49B5 /* libPods-Pozume.a */,
+				B87B92A1886F8ADB7A80B6F9 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -91,6 +164,8 @@
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				D65327D7A22EEC0BE12398D9 /* Pods */,
 				D7E4C46ADA2E9064B798F356 /* ExpoModulesProviders */,
+				D5333E55FF1FA05C8E925B25 /* Widget */,
+				A59E1CC975A27DDEB67715A8 /* ShareExtension */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -101,6 +176,8 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* Pozume.app */,
+				89ACFCEB72660C3ACED8956A /* PozumeWidget.appex */,
+				4B48CB4C48A38F03682E24D1 /* PozumeShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -113,6 +190,24 @@
 			name = Pozume;
 			sourceTree = "<group>";
 		};
+		A59E1CC975A27DDEB67715A8 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				3AB0D842DFE104B478174337 /* ShareViewController.swift */,
+			);
+			name = ShareExtension;
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		B87B92A1886F8ADB7A80B6F9 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				CB8AF3149F8A0130D6003127 /* Foundation.framework */,
+				15234B3C3654B61D7C6F6E7F /* WidgetKit.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -120,6 +215,15 @@
 			);
 			name = Supporting;
 			path = Pozume/Supporting;
+			sourceTree = "<group>";
+		};
+		D5333E55FF1FA05C8E925B25 /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				267FCAFCCC636DF0F7958BDB /* PozumeWidget.swift */,
+			);
+			name = Widget;
+			path = Widget;
 			sourceTree = "<group>";
 		};
 		D65327D7A22EEC0BE12398D9 /* Pods */ = {
@@ -142,6 +246,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		0F14A5E899C9D6B307C541DA /* PozumeWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 323AD7B66FF6F2F6DBA6442F /* Build configuration list for PBXNativeTarget "PozumeWidget" */;
+			buildPhases = (
+				626618DDCFAD5B230E0D66B4 /* Sources */,
+				2D96BEEE0F3F81B1A7EB58BC /* Frameworks */,
+				59315D3D5939CD57A5E4AFF8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PozumeWidget;
+			productName = PozumeWidget;
+			productReference = 89ACFCEB72660C3ACED8956A /* PozumeWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		13B07F861A680F5B00A75B9A /* Pozume */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Pozume" */;
@@ -154,15 +275,36 @@
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
 				A53702A2970C04CAC83801D1 /* [CP] Embed Pods Frameworks */,
+				F291DF56D9205646CC4F3E95 /* Embed Foundation Extensions */,
+				AFDC6DD4C4495FED7A06C0A0 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				97B6D63E7B33F8EB54237FA3 /* PBXTargetDependency */,
+				F2FDBFCA9E5E99AB5E59EB88 /* PBXTargetDependency */,
 			);
 			name = Pozume;
 			productName = Pozume;
 			productReference = 13B07F961A680F5B00A75B9A /* Pozume.app */;
 			productType = "com.apple.product-type.application";
+		};
+		75D0F739E8FAA05186B6CE74 /* PozumeShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 63E347F1288314BA253D7FCB /* Build configuration list for PBXNativeTarget "PozumeShare" */;
+			buildPhases = (
+				8092F3900E81723C332C40B6 /* Sources */,
+				602200A961318FB69CC76FB8 /* Frameworks */,
+				7E8C8FB11091EEB03D867E16 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PozumeShare;
+			productName = PozumeShare;
+			productReference = 4B48CB4C48A38F03682E24D1 /* PozumeShare.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -191,6 +333,8 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* Pozume */,
+				0F14A5E899C9D6B307C541DA /* PozumeWidget */,
+				75D0F739E8FAA05186B6CE74 /* PozumeShare */,
 			);
 		};
 /* End PBXProject section */
@@ -204,6 +348,20 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
 				C4379527CF76BEB00659AE74 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		59315D3D5939CD57A5E4AFF8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E8C8FB11091EEB03D867E16 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -336,7 +494,38 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		626618DDCFAD5B230E0D66B4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				191B91349A3A122CFB6F17BC /* PozumeWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8092F3900E81723C332C40B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0A6016C2DCC9AD95BEEA785C /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		97B6D63E7B33F8EB54237FA3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PozumeWidget;
+			target = 0F14A5E899C9D6B307C541DA /* PozumeWidget */;
+			targetProxy = 63CFB902A97FF751E41355C6 /* PBXContainerItemProxy */;
+		};
+		F2FDBFCA9E5E99AB5E59EB88 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PozumeShare;
+			target = 75D0F739E8FAA05186B6CE74 /* PozumeShare */;
+			targetProxy = 614DA4F1A3956CFBC3ED9445 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
@@ -398,6 +587,79 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		1F330E0FAD0F381BA77C7CF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.5.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = de.inthielligent.pozume.Share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		237612C8917D6BAC0442F981 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Widget/Widget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.5.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = de.inthielligent.pozume.Widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		4488F3C692F4D5DBF072C20D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Widget/Widget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.5.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = de.inthielligent.pozume.Widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
 		};
 		83CBBA201A601CBA00E9B192 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -517,6 +779,31 @@
 			};
 			name = Release;
 		};
+		D254AA4198B3BEF145424A15 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MARKETING_VERSION = 0.5.0;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = de.inthielligent.pozume.Share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -525,6 +812,24 @@
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
 				13B07F951A680F5B00A75B9A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		323AD7B66FF6F2F6DBA6442F /* Build configuration list for PBXNativeTarget "PozumeWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				237612C8917D6BAC0442F981 /* Release */,
+				4488F3C692F4D5DBF072C20D /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		63E347F1288314BA253D7FCB /* Build configuration list for PBXNativeTarget "PozumeShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D254AA4198B3BEF145424A15 /* Release */,
+				1F330E0FAD0F381BA77C7CF0 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

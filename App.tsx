@@ -19,6 +19,7 @@ import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
+import { saveServerConfig, clearServerConfig } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
 import * as Linking from 'expo-linking';
 import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
@@ -79,6 +80,8 @@ function AppInner() {
           setClient(c);
           setLocked(await getAppLock());
           c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+          // Widget + Share-Extension brauchen die Zugangsdaten aus der App Group
+          saveServerConfig(stored);
         }
         await loadLocaleOverride();
         await loadThemeOverride();
@@ -97,6 +100,7 @@ function AppInner() {
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
     saveServer(c.cfg).catch(() => {});
+    saveServerConfig(c.cfg);
     c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
   }, []);
 
@@ -311,7 +315,7 @@ function AppInner() {
           client={client}
           onLockChange={onLockToggle}
           onLocaleChange={() => {}}
-          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); }}
+          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); clearServerConfig(); }}
           onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}
         />
