@@ -19,6 +19,7 @@ import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
+// App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
 import { saveServerConfig, clearServerConfig } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
 import * as Linking from 'expo-linking';
@@ -97,6 +98,8 @@ function AppInner() {
   // Bei Theme-Wechsel alles neu rendern
   useEffect(() => onThemeChange(() => forceRender((n) => n + 1)), []);
 
+  // Nach erfolgreichem Login: Zugangsdaten persistieren (Keychain + App Group
+  // für Widget/Share-Extension) und erste Notizliste laden
   const onConnected = useCallback((c: PoznoteClient) => {
     setClient(c);
     saveServer(c.cfg).catch(() => {});
@@ -315,6 +318,8 @@ function AppInner() {
           client={client}
           onLockChange={onLockToggle}
           onLocaleChange={() => {}}
+          // Logout: Client zurücksetzen und App-Group-Zugangsdaten löschen,
+          // damit Widget/Share-Extension keine gültigen Credentials mehr haben
           onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); clearServerConfig(); }}
           onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}

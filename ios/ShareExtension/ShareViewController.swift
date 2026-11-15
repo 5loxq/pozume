@@ -8,9 +8,12 @@ import UniformTypeIdentifiers
  */
 class ShareViewController: UIViewController {
 
-  private let statusLabel = UILabel()
-  private let previewLabel = UILabel()
+  // UI-Elemente
+  private let statusLabel = UILabel()      // Rückmeldung: speichert / Fehler / Erfolg
+  private let previewLabel = UILabel()    // Vorschau des geteilten Inhalts
   private let saveButton = UIButton(type: .system)
+
+  // Geteilte Inhalte (aus dem Extension-Context extrahiert)
   private var sharedText: String = ""
   private var sharedUrl: String = ""
   private var sharedTitle: String = ""
@@ -24,11 +27,18 @@ class ShareViewController: UIViewController {
 
   // MARK: - Geteilte Inhalte extrahieren
 
+  /**
+   * Liest die geteilten Elemente aus dem Extension-Context.
+   * Safari liefert URLs teils als UTType.url, teils als Property-List
+   * (mit Titel), Text-Apps als PlainText — alle drei Varianten werden
+   * der Reihe nach probiert.
+   */
   private func loadSharedItem() {
     guard let items = extensionContext?.inputItems as? [NSExtensionItem] else { return }
     for item in items {
       guard let providers = item.attachments else { continue }
       for provider in providers {
+        // Variante 1: direkte URL (z.B. aus Fotos, Bookmark-Apps)
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
           provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, _ in
             if let url = data as? URL {
@@ -38,6 +48,7 @@ class ShareViewController: UIViewController {
             }
           }
         }
+        // Variante 2: einfacher Text (z.B. aus Notiz-Apps, Copy-Paste)
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
           provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { data, _ in
             if let text = data as? String {
@@ -47,8 +58,8 @@ class ShareViewController: UIViewController {
             }
           }
         }
+        // Variante 3: Safari liefert die URL als Property-List (kompakter Titel + URL)
         if provider.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier) {
-          // Safari liefert die URL als Property-List (kompakter Titel + URL)
           provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier, options: nil) { data, _ in
             if let dict = data as? [String: Any],
                let url = (dict[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any])?["URL"] as? String {
@@ -64,6 +75,7 @@ class ShareViewController: UIViewController {
     }
   }
 
+  /** Vorschau-Label mit Titel, URL und Text des geteilten Inhalts aktualisieren. */
   private func updatePreview() {
     let heading = sharedTitle.isEmpty ? "Geteilt" : sharedTitle
     previewLabel.text = [heading, sharedUrl, sharedText].filter { !$0.isEmpty }.joined(separator: "\n")
@@ -71,6 +83,7 @@ class ShareViewController: UIViewController {
 
   // MARK: - UI
 
+  /** Baut die Oberfläche auf: Titel, Vorschau, Statuszeile, Speichern- und Abbrechen-Button. */
   private func buildUi() {
     let title = UILabel()
     title.text = "🪶 An Pozume senden"
@@ -123,23 +136,32 @@ class ShareViewController: UIViewController {
     ])
   }
 
+  /** Abbrechen: Extension ohne Speichern schließen. */
   @objc private func cancelTapped() {
     extensionContext?.completeRequest(returningItems: nil)
   }
 
   // MARK: - Speichern
 
+  /**
+   * Speichern-Button: baut aus Titel/URL/Text eine Markdown-Notiz
+   * (Überschrift = Seitentitel oder URL, Inhalt = Link + Text)
+   * und legt sie per POST auf dem Server ab.
+   */
   @objc private func saveTapped() {
     saveButton.isEnabled = false
     statusLabel.text = "Speichert…"
 
+    // Ohne Anmeldung in der Haupt-App kann die Extension nichts speichern
     guard let config = loadConfig() else {
       statusLabel.text = "Keine Anmeldung — bitte zuerst in der Pozume-App einloggen."
       saveButton.isEnabled = true
       return
     }
 
+    // Überschrift: Seitentitel, sonst URL-Anfang, sonst Fallback
     let heading = sharedTitle.isEmpty ? (sharedUrl.isEmpty ? "Geteilte Notiz" : String(sharedUrl.prefix(60))) : sharedTitle
+    // Inhalt: URL als Markdown-Link, darunter der geteilte Text
     var content = ""
     if !sharedUrl.isEmpty {
       content += "[\(sharedUrl)](\(sharedUrl))\n\n"
@@ -157,6 +179,7 @@ class ShareViewController: UIViewController {
       DispatchQueue.main.async {
         guard let self else { return }
         if success {
+          // Nach Erfolg kurz Bestätigung zeigen, dann Extension schließen
           self.statusLabel.text = "✓ Gespeichert"
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.extensionContext?.completeRequest(returningItems: nil)
@@ -169,6 +192,7 @@ class ShareViewController: UIViewController {
     }
   }
 
+  /** Server-Konfiguration aus der App Group lesen; nil, wenn noch nicht angemeldet. */
   private func loadConfig() -> ServerConfig? {
     guard
       let raw = UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.server"),
@@ -177,6 +201,11 @@ class ShareViewController: UIViewController {
     return try? JSONDecoder().decode(ServerConfig.self, from: data)
   }
 
+  /**
+   * Legt die Notiz an (POST /api/v1/notes, Markdown-Typ).
+   * Auth identisch zur App: Basic Auth + X-User-ID-Header.
+   * completion: (Erfolg, Fehlermeldung)
+   */
   private func createNote(config: ServerConfig, heading: String, content: String, completion: @escaping (Bool, String) -> Void) {
     guard let url = URL(string: "\(config.baseUrl)/api/v1/notes") else {
       completion(false, "Ungültige Server-Adresse")
@@ -214,6 +243,7 @@ class ShareViewController: UIViewController {
   }
 }
 
+/** Server-Zugangsdaten, von der Haupt-App als JSON in die App Group geschrieben. */
 struct ServerConfig: Codable {
   let baseUrl: String
   let username: String
