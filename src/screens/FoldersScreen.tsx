@@ -10,15 +10,16 @@ import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { readCachedFolders, cacheFolders } from '../api/cache';
 
-interface Folder { id: number; name: string; notes_count?: number; workspace?: string }
+interface Folder { id: number; name: string; notes_count?: number; workspace?: string; color_hex?: string | null }
 
 interface Props {
   client: PoznoteClient;
   onOpenFolder: (folder: Folder) => void;
+  onOpenKanban: (folder: Folder) => void;
   onBack: () => void;
 }
 
-export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
+export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -104,9 +105,17 @@ export default function FoldersScreen({ client, onOpenFolder, onBack }: Props) {
     ]);
   };
 
+  const folderMenu = (folder: Folder) => {
+    Alert.alert(folder.name, '', [
+      { text: t('folders.openKanban'), onPress: () => onOpenKanban(folder) },
+      { text: t('common.delete'), style: 'destructive', onPress: () => confirmDeleteFolder(folder) },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
+
   const renderFolder = ({ item }: { item: Folder }) => (
-    <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)} onLongPress={() => confirmDeleteFolder(item)}>
-      <Text style={styles.icon}>📁</Text>
+    <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)} onLongPress={() => folderMenu(item)}>
+      <Text style={[styles.icon, item.color_hex ? { color: item.color_hex } : null]}>📁</Text>
       <View style={styles.nameWrap}>
         <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
         {item.workspace ? <Text style={styles.wsLabel} numberOfLines={1}>{item.workspace}</Text> : null}

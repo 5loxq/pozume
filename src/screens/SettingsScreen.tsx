@@ -19,10 +19,11 @@ interface Props {
   onLockChange: (enabled: boolean) => void;
   onLocaleChange: (locale: Locale | 'auto') => void;
   onLoggedOut: () => void;
+  onOpenArchive: () => void;
   onBack: () => void;
 }
 
-export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onBack }: Props) {
+export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onOpenArchive, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -155,6 +156,13 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
             </View>
           ) : null}
         </View>
+
+        <TouchableOpacity style={[styles.card, shadow]} onPress={onOpenArchive}>
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowText}>📦 {t('settings.archive')}</Text>
+            <Text style={styles.chevron}>›</Text>
+          </View>
+        </TouchableOpacity>
 
         <Text style={styles.section}>{t('settings.exportSection')}</Text>
         <View style={[styles.card, shadow]}>

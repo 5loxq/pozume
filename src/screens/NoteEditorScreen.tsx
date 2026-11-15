@@ -59,6 +59,8 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ heading, content, tags });
   latest.current = { heading, content, tags };
+  // Version-Token des Servers für optimistische Konkurrenz (if_version)
+  const versionRef = useRef<string | undefined>(note?.version);
   // Eindeutiger Schlüssel für die Offline-Queue (neue Notizen haben noch keine ID)
   const localQueueKey = useRef(`new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
   // Editor-Session für den Server-Edit-Lock
@@ -68,7 +70,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const [foreignLock, setForeignLock] = useState<NoteLockInfo | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const persist = async () => {
+  const persist = async (opts: { ignoreVersion?: boolean } = {}) => {
     setSaveState('saving');
     const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
     const queueKey = noteIdRef.current != null ? `note-${noteIdRef.current}` : localQueueKey;
@@ -82,9 +84,16 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         });
         noteIdRef.current = res.note.id;
         setNoteId(res.note.id);
+        versionRef.current = res.note.version;
         onSaved(res.note);
       } else {
-        await client.updateNote(noteIdRef.current, body);
+        // if_version: wurde die Notiz zwischenzeitlich woanders geändert,
+        // antwortet der Server 409 mit dem aktuellen Stand — kein stilles Überschreiben.
+        const res = await client.updateNote(noteIdRef.current, {
+          ...body,
+          ...(opts.ignoreVersion ? {} : versionRef.current ? { if_version: versionRef.current } : {}),
+        });
+        if (res.note?.version) versionRef.current = res.note.version;
         onSaved({ ...(note as Note), ...body, updated_at: new Date().toISOString() });
       }
       setSaveState('saved');
@@ -103,10 +112,35 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         setSaveState('queued');
         return;
       }
+      if (e?.status === 409 && e?.data?.code === 'version_conflict') {
+        setSaveState('dirty');
+        handleVersionConflict(e.data.current);
+        return;
+      }
       setSaveState('dirty');
       const msg = e?.message ?? String(e);
       Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
     }
+  };
+
+  /** 409 version_conflict: Nutzer entscheidet, ob die eigene oder die Server-Version gewinnt */
+  const handleVersionConflict = (current: { version?: string; heading?: string; content?: string }) => {
+    Alert.alert(t('editor.conflictTitle'), t('editor.conflictText'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('editor.conflictUseServer'),
+        onPress: () => {
+          setHeading(current.heading ?? '');
+          setContent(current.content ?? '');
+          versionRef.current = current.version;
+          setSaveState('saved');
+        },
+      },
+      {
+        text: t('editor.conflictOverwrite'), style: 'destructive',
+        onPress: () => { persist({ ignoreVersion: true }); },
+      },
+    ]);
   };
 
   // Autosave 1.2s nach letzter Eingabe
@@ -238,6 +272,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         setServerLocked(!!n.locked);
         setNoteColorHex(n.color_hex ?? null);
         setNoteType(n.type);
+        versionRef.current = n.version;
         // Ältere Server-Versionen kennen kein `locked`-Feld — Chip dann gar nicht erst anbieten
         setServerLockSupported('locked' in n);
         // Zeichnung nur als SVG-Anhang? (älteres Format: Inhalt leer oder nur <img>) → SVG laden

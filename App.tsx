@@ -15,6 +15,7 @@ import TagsScreen from './src/screens/TagsScreen';
 import VersionsScreen from './src/screens/VersionsScreen';
 import RemindersScreen from './src/screens/RemindersScreen';
 import GraphScreen from './src/screens/GraphScreen';
+import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
@@ -33,6 +34,8 @@ type Route =
   | { name: 'versions'; noteId: number }
   | { name: 'reminders' }
   | { name: 'graph' }
+  | { name: 'kanban'; folderId: number; folderName: string }
+  | { name: 'archive' }
   | { name: 'ai' }
   | { name: 'tasks' };
 
@@ -229,6 +232,33 @@ function AppInner() {
     );
   }
 
+  if (route.name === 'kanban') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <KanbanScreen client={client} folderId={route.folderId} folderName={route.folderName}
+          onOpenNote={openNote} onBack={() => setRoute({ name: 'list' })} />
+      </>
+    );
+  }
+
+  if (route.name === 'archive') {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <NotesListScreen
+          client={client}
+          workspace="Archives"
+          title={t('archive.title')}
+          onOpenNote={openNote}
+          onCreateNote={createNote}
+          onBack={() => setRoute({ name: 'list' })}
+          refreshKey={dataVersion}
+        />
+      </>
+    );
+  }
+
   if (route.name === 'tags') {
     return (
       <>
@@ -265,6 +295,7 @@ function AppInner() {
           onLockChange={onLockToggle}
           onLocaleChange={() => {}}
           onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); }}
+          onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}
         />
       </>
@@ -304,6 +335,7 @@ function AppInner() {
         <FoldersScreen
           client={client}
           onOpenFolder={(f) => setRoute({ name: 'folderNotes', folderId: f.id, folderName: f.name })}
+          onOpenKanban={(f) => setRoute({ name: 'kanban', folderId: f.id, folderName: f.name })}
           onBack={() => setRoute({ name: 'list' })}
         />
       </>

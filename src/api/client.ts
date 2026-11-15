@@ -24,6 +24,8 @@ export interface Note {
   workspace?: string;
   color?: string | null;
   color_hex?: string | null;
+  /** Version-Token für optimistische Konkurrenz (if_version) */
+  version?: string;
 }
 
 export interface GraphNode {
@@ -95,7 +97,14 @@ export interface NoteLockInfo {
 }
 
 export class PoznoteError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  status: number;
+  /** Geparpte Fehler-Antwort des Servers (z.B. {code, current} bei 409 version_conflict) */
+  data?: any;
+  constructor(status: number, message: string, data?: any) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
 }
 
 /**
@@ -180,7 +189,12 @@ export class PoznoteClient {
       const text = await res.text().catch(() => '');
       const isHtml = text.trimStart().startsWith('<');
       const detail = isHtml ? 'HTML-Fehlerseite (ggf. WAF/CSRF)' : text.slice(0, 200);
-      throw new PoznoteError(res.status, `HTTP ${res.status}: ${detail}`);
+      // Strukturierte Fehler (z.B. 409 version_conflict mit `current`) mitliefern
+      let data: any;
+      if (!isHtml) {
+        try { data = JSON.parse(text); } catch { data = undefined; }
+      }
+      throw new PoznoteError(res.status, `HTTP ${res.status}: ${detail}`, data);
     }
     return res.json() as Promise<T>;
   }
@@ -203,8 +217,13 @@ export class PoznoteClient {
     return this.req<{ note: Note }>('/notes', { method: 'POST', body: JSON.stringify(input) });
   }
 
-  updateNote(id: number, patch: Partial<Pick<Note, 'heading' | 'content' | 'tags' | 'folder_id' | 'favorite'>>) {
-    return this.req<{ success: boolean }>(`/notes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  /**
+   * Notiz aktualisieren. `if_version` = Version-Token aus GET /notes/{id}:
+   * Wurde die Notiz zwischenzeitlich geändert, antwortet der Server mit 409
+   * (code "version_conflict") und dem aktuellen Stand in `data.current`.
+   */
+  updateNote(id: number, patch: Partial<Pick<Note, 'heading' | 'content' | 'tags' | 'folder_id' | 'favorite'>> & { if_version?: string }) {
+    return this.req<{ success: boolean; note?: { version?: string } }>(`/notes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
   deleteNote(id: number) {
@@ -350,11 +369,23 @@ export class PoznoteClient {
     const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
     // Server liefert Tasklisten teils unter `checklists`, teils unter `notes` — beides zusammenführen
     const res = await this.req<{ notes?: unknown[]; checklists?: unknown[] }>(`/tasks${qs}`);
-    const list = [...(res.notes ?? []), ...(res.checklists ?? [])] as Array<{ id: number; heading: string; folder?: string; tasks: Array<{ id: number; text: string; completed: boolean; dueAt?: string | null }> }>;
+    const list = [...(res.notes ?? []), ...(res.checklists ?? [])] as Array<{
+      id: number; heading: string; folder?: string;
+      tasks: Array<{ id: number; text: string; completed: boolean; priority?: string | null; dueAt?: string | null }>;
+    }>;
     return { notes: list };
   }
 
-  updateTask(noteId: number, taskId: number, patch: { completed?: boolean; text?: string; priority?: string | null }) {
+  /** Aufgabe an eine Tasklisten-Notiz anhängen */
+  addTask(noteId: number, input: { text: string; due_at?: string; priority?: 'high' | 'medium' | 'low' | 'none'; reminder?: boolean }) {
+    return this.req<{ success: boolean; task: { id: number } }>(`/notes/${noteId}/tasks`, { method: 'POST', body: JSON.stringify(input) });
+  }
+
+  deleteTask(noteId: number, taskId: number) {
+    return this.req<{ success: boolean }>(`/notes/${noteId}/tasks/${taskId}`, { method: 'DELETE' });
+  }
+
+  updateTask(noteId: number, taskId: number, patch: { completed?: boolean; text?: string; priority?: string | null; due_at?: string | null }) {
     return this.req<{ success: boolean }>(`/notes/${noteId}/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(patch) });
   }
 
@@ -399,9 +430,12 @@ export class PoznoteClient {
   }
 
   // --- Folders ---
-  listFolders(workspace?: string) {
-    const qs = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
-    return this.req<{ folders: unknown[] }>(`/folders${qs}`);
+  listFolders(workspace?: string, hierarchical?: boolean) {
+    const params = new URLSearchParams();
+    if (workspace) params.set('workspace', workspace);
+    if (hierarchical) params.set('hierarchical', 'true');
+    const qs = params.toString();
+    return this.req<{ folders: unknown[] }>(`/folders${qs ? `?${qs}` : ''}`);
   }
 
   createFolder(name: string, workspace?: string) {

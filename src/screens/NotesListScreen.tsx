@@ -22,6 +22,7 @@ interface Props {
   onCreateNote: () => void;
   onCreateDrawing?: () => void;
   folderId?: number;
+  workspace?: string;
   title?: string;
   onBack?: () => void;
   onOpenFolders?: () => void;
@@ -38,7 +39,7 @@ interface Props {
   refreshKey?: number;
 }
 
-export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCreateDrawing, folderId, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, onOpenTags, onOpenReminders, onOpenGraph, tag, onTagPress, refreshKey }: Props) {
+export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCreateDrawing, folderId, workspace, title, onBack, onOpenFolders, onOpenTrash, onOpenSettings, onOpenAi, onOpenTasks, onOpenTags, onOpenReminders, onOpenGraph, tag, onTagPress, refreshKey }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
@@ -86,7 +87,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     if (!opts.silent) setLoading(true);
     setError(null);
     try {
-      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(tag ? { tags: tag } : {}) });
+      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(workspace ? { workspace } : {}), ...(tag ? { tags: tag } : {}) });
       let list = res.notes ?? [];
       // Der Server ignoriert den tags-Parameter je nach Version — deshalb zusätzlich lokal filtern
       if (tag) {
@@ -97,7 +98,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       setNotes(list);
       // Nur die ungefilterte Gesamtliste cachen — Teilmenge würden beim nächsten Boot
       // fälschlich als "alle Notizen" erscheinen.
-      if (folderId == null && !tag) cacheNotes(list).catch(() => {});
+      if (folderId == null && !tag && !workspace) cacheNotes(list).catch(() => {});
     } catch (e: any) {
       // Offline: Cache zeigen statt harter Fehler
       const cached = await readCachedNotes<Note[]>();
@@ -110,7 +111,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       setLoading(false);
       setRefreshing(false);
     }
-  }, [client, folderId, tag]);
+  }, [client, folderId, workspace, tag]);
 
   // Boot: sofort Cache zeigen, dann live aktualisieren
   useEffect(() => {
@@ -142,7 +143,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       }
       return;
     }
-    if (folderId != null || tag) return;
+    if (folderId != null || tag || workspace != null) return;
     let cancelled = false;
     usedServerSearch.current = true;
     setLoading(true);
@@ -151,7 +152,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       .catch(() => { if (!cancelled) load({ silent: true }); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [searchQuery, client, folderId, tag, load]);
+  }, [searchQuery, client, folderId, workspace, tag, load]);
 
   // Nach Änderungen (z.B. Speichern im Editor) still neu laden — außer eine
   // Server-Suche ist aktiv: deren Ergebnis würde sonst durch die volle Liste ersetzt.
