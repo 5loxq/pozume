@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, ActivityIndicator, useWindowDimensions, AppState, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
@@ -17,7 +17,8 @@ import RemindersScreen from './src/screens/RemindersScreen';
 import GraphScreen from './src/screens/GraphScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
-import { loadLocaleOverride, onLocaleChange } from './src/i18n';
+import { flushQueue, queueSize } from './src/api/offlineQueue';
+import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
 import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
@@ -97,6 +98,29 @@ function AppInner() {
     // Aktivieren sperrt die App erst beim nächsten Start; Deaktivieren entsperrt sofort.
     if (!enabled) setLocked(false);
   }, []);
+
+  // Offline-Queue: beim Start und bei Rückkehr in den Vordergrund abarbeiten
+  const flushOffline = useCallback(async () => {
+    if (!client) return;
+    try {
+      if ((await queueSize()) === 0) return;
+      const res = await flushQueue(client);
+      if (res.flushed > 0) {
+        setDataVersion((v) => v + 1);
+        client.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+        Alert.alert('🪶', t('offline.flushed', { n: res.flushed }));
+      }
+    } catch {}
+  }, [client]);
+
+  useEffect(() => { flushOffline(); }, [flushOffline]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') flushOffline();
+    });
+    return () => sub.remove();
+  }, [flushOffline]);
 
   if (booting) {
     return (

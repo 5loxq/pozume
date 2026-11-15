@@ -20,6 +20,16 @@ export function parseTags(raw?: string): string[] {
   return raw.split(',').map((t) => t.trim()).filter(Boolean);
 }
 
+/** Bytes als Base64-String (für FileSystem.writeAsStringAsync mit Base64-Encoding) */
+export function base64FromBytes(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 /** Erste ~2 Zeilen Klartext aus Markdown/HTML-Inhalt */
 export function excerpt(content?: string, max = 120): string {
   if (!content) return '';

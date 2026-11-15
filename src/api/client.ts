@@ -85,6 +85,15 @@ export interface ReminderRow {
   task_id?: string | null;
 }
 
+export interface NoteLockInfo {
+  holder_username?: string;
+  holder_is_public?: boolean;
+  holder_is_current_user?: boolean;
+  holder_is_current_editor_session?: boolean;
+  expires_at?: string;
+  last_seen_at?: string;
+}
+
 export class PoznoteError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
@@ -409,9 +418,71 @@ export class PoznoteClient {
     return this.req<{ current_version?: string; latest_version?: string; is_up_to_date?: boolean }>('/system/version');
   }
 
+  // --- Export (Legacy-Endpunkte außerhalb /api/v1) ---
+  /** Einzelne Notiz exportieren (format: markdown | html | json) */
+  async exportNote(id: number, format: 'markdown' | 'html' | 'json'): Promise<string> {
+    const res = await fetch(`${this.cfg.baseUrl}/api_export_note.php?id=${id}&format=${format}&disposition=inline`, {
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    return res.text();
+  }
+
+  /** Serverseitigen ZIP-Export herunterladen (alle Notizen oder alle Anhänge) */
+  async downloadExport(kind: 'entries' | 'attachments'): Promise<Uint8Array> {
+    const path = kind === 'entries' ? 'api_export_entries.php' : 'api_export_attachments.php';
+    const res = await fetch(`${this.cfg.baseUrl}/${path}`, {
+      headers: this.authHeaders(),
+    });
+    if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  // --- Edit-Locks (wer hat die Notiz gerade offen?) ---
+  getNoteLock(id: number) {
+    return this.req<{ lock: NoteLockInfo | null }>(`/notes/${id}/lock`);
+  }
+
+  /** Edit-Lock für diese Editor-Session nehmen; 423 = jemand anderes hält ihn */
+  acquireNoteLock(id: number, editorSessionId: string) {
+    return this.req<{ lock: NoteLockInfo; taken_over?: boolean }>(`/notes/${id}/lock`, { method: 'POST', body: JSON.stringify({ editor_session_id: editorSessionId }) });
+  }
+
+  refreshNoteLock(id: number, editorSessionId: string) {
+    return this.req<{ success: boolean }>(`/notes/${id}/lock/heartbeat`, { method: 'POST', body: JSON.stringify({ editor_session_id: editorSessionId }) });
+  }
+
+  releaseNoteLock(id: number, editorSessionId: string) {
+    return this.req<{ released: boolean }>(`/notes/${id}/lock/release`, { method: 'POST', body: JSON.stringify({ editor_session_id: editorSessionId }) });
+  }
+
   // --- Attachments ---
   listAttachments(noteId: number) {
     return this.req<{ attachments: Array<{ id: string; filename: string; original_filename?: string; file_size?: number; file_type?: string; uploaded_at?: string }> }>(`/notes/${noteId}/attachments`);
+  }
+
+  /** Datei als Anhang hochladen (multipart; uri = lokale Datei, z.B. aus dem Document-Picker) */
+  async uploadAttachment(noteId: number, file: { uri: string; name: string; mimeType?: string }): Promise<{ attachment_id: string; filename: string }> {
+    const form = new FormData();
+    form.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType || 'application/octet-stream',
+    } as any);
+    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments`, {
+      method: 'POST',
+      headers: this.authHeaders(),
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new PoznoteError(res.status, `HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return res.json();
+  }
+
+  async deleteAttachment(noteId: number, attachmentId: string) {
+    return this.req<{ success: boolean }>(`/notes/${noteId}/attachments/${attachmentId}`, { method: 'DELETE' });
   }
 
   /** Anhang als Text roh laden (z.B. SVG-Zeichnungen) */

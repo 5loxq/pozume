@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { usePalette, spacing, radius, typeFor, shadow,
   Palette, saveThemeOverride, getThemeMode, type ThemeMode,
 } from '../theme';
 import { t, Locale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer, getAppLock } from '../api/store';
+import { base64FromBytes } from '../utils';
 
 interface Props {
   client: PoznoteClient;
@@ -27,6 +30,7 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const [themeMode, setThemeMode] = useState<ThemeMode>('auto');
   const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<'entries' | 'attachments' | null>(null);
 
   useEffect(() => { loadLocaleOverride().then(setLocaleMode); }, []);
   useEffect(() => { setThemeMode(getThemeMode()); }, []);
@@ -67,6 +71,25 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
         },
       },
     ]);
+  };
+
+  // Serverseitigen ZIP-Export herunterladen und über das Teilen-Menü weitergeben
+  const exportZip = async (kind: 'entries' | 'attachments') => {
+    if (exporting) return;
+    setExporting(kind);
+    try {
+      const bytes = await client.downloadExport(kind);
+      const name = `pozume-${kind === 'entries' ? 'notizen' : 'anhaenge'}-${new Date().toISOString().slice(0, 10)}.zip`;
+      const path = `${FileSystem.cacheDirectory}${name}`;
+      await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'application/zip', dialogTitle: name });
+      }
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    } finally {
+      setExporting(null);
+    }
   };
 
   return (
@@ -133,6 +156,18 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
           ) : null}
         </View>
 
+        <Text style={styles.section}>{t('settings.exportSection')}</Text>
+        <View style={[styles.card, shadow]}>
+          <TouchableOpacity style={styles.row} onPress={() => exportZip('entries')} disabled={exporting != null}>
+            <Text style={styles.rowText}>🗂 {t('settings.exportNotes')}</Text>
+            {exporting === 'entries' ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.chevron}>›</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => exportZip('attachments')} disabled={exporting != null}>
+            <Text style={styles.rowText}>📎 {t('settings.exportAttachments')}</Text>
+            {exporting === 'attachments' ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.chevron}>›</Text>}
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity style={[styles.logoutBtn, shadow]} onPress={confirmLogout}>
           <Text style={styles.logoutText}>↩ {t('settings.logout')}</Text>
         </TouchableOpacity>
@@ -167,4 +202,5 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   logoutText: { color: colors.danger, fontWeight: '700', fontSize: 15 },
   version: { ...type.faint(), textAlign: 'center', marginTop: spacing.xl },
   check: { color: colors.primary, fontSize: 18, fontWeight: '700' },
+  chevron: { color: colors.textFaint, fontSize: 20 },
 });

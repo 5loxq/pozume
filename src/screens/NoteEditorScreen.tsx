@@ -7,7 +7,9 @@ import { Share } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { setReminder, removeReminder } from '../api/reminders';
+import { enqueueWrite, removeWrite } from '../api/offlineQueue';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
@@ -17,7 +19,8 @@ import { usePalette, spacing, radius, typeFor, primaryButton, shadow,
   Palette,
 } from '../theme';
 import { t, getLocale } from '../i18n';
-import type { PoznoteClient, Note, Backlink, TemplateInfo } from '../api';
+import type { PoznoteClient, Note, Backlink, TemplateInfo, NoteLockInfo } from '../api';
+import { base64FromBytes } from '../utils';
 
 interface Props {
   client: PoznoteClient;
@@ -35,15 +38,6 @@ interface Attachment { id: string; filename: string; original_filename?: string;
 /** Farb-Palette für Notiz-Karten (Hex geht direkt an den Server, unabhängig von dessen Palette) */
 const NOTE_COLORS = ['#3b82f6', '#16a34a', '#dc2626', '#f59e0b', '#7c3aed', '#db2777', '#0d9488'];
 
-function base64FromBytes(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
 export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
@@ -54,7 +48,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const [heading, setHeading] = useState(note?.heading ?? '');
   const [content, setContent] = useState(isNew && drawing ? emptyDrawingHtml() : (note?.content ?? ''));
   const [tags, setTags] = useState(note?.tags ?? '');
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'queued'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
   const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
   const [favorite, setFavorite] = useState(!!note?.favorite);
@@ -65,10 +59,19 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ heading, content, tags });
   latest.current = { heading, content, tags };
+  // Eindeutiger Schlüssel für die Offline-Queue (neue Notizen haben noch keine ID)
+  const localQueueKey = useRef(`new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
+  // Editor-Session für den Server-Edit-Lock
+  const editorSessionId = useRef(`pozume-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).current;
+  const lockHeld = useRef(false);
+  const lockTried = useRef(false);
+  const [foreignLock, setForeignLock] = useState<NoteLockInfo | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const persist = async () => {
     setSaveState('saving');
     const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
+    const queueKey = noteIdRef.current != null ? `note-${noteIdRef.current}` : localQueueKey;
     try {
       if (noteIdRef.current == null) {
         const res = await client.createNote({
@@ -85,8 +88,21 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         onSaved({ ...(note as Note), ...body, updated_at: new Date().toISOString() });
       }
       setSaveState('saved');
+      removeWrite(queueKey).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
+      if (e?.status === 0) {
+        // Offline: Schreibvorgang dauerhaft einreihen — kein Datenverlust bei App-Kill.
+        // Die Queue wird beim nächsten Start/Vordergrund-Wechsel automatisch geleert.
+        enqueueWrite({
+          key: queueKey,
+          kind: noteIdRef.current == null ? 'create' : 'update',
+          noteId: noteIdRef.current ?? undefined,
+          body,
+        }).catch(() => {});
+        setSaveState('queued');
+        return;
+      }
       setSaveState('dirty');
       const msg = e?.message ?? String(e);
       Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
@@ -96,9 +112,53 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   // Autosave 1.2s nach letzter Eingabe
   const scheduleSave = () => {
     setSaveState('dirty');
+    ensureLock();
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persist, 1200);
   };
+
+  // --- Server-Edit-Lock: sichtbar machen, wer die Notiz offen hat ---
+  // Lock beim ersten Editieren nehmen, per Heartbeat halten, beim Verlassen freigeben
+  const ensureLock = () => {
+    if (note?.id == null || lockTried.current) return;
+    lockTried.current = true;
+    client.acquireNoteLock(note.id, editorSessionId)
+      .then(() => { lockHeld.current = true; })
+      .catch(() => { /* 423: hält jemand anders — der Status-Poll zeigt das Banner */ });
+  };
+
+  // Lock-Status beim Öffnen laden und laufend prüfen (Web-Editor kann ihn jederzeit nehmen)
+  useEffect(() => {
+    if (note?.id == null) return;
+    let cancelled = false;
+    const check = () => {
+      client.getNoteLock(note.id!)
+        .then((r) => {
+          if (cancelled) return;
+          setForeignLock(r.lock && !r.lock.holder_is_current_editor_session ? r.lock : null);
+        })
+        .catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [note?.id, client]);
+
+  // Heartbeat halten + Lock beim Verlassen des Editors freigeben
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (lockHeld.current && note?.id != null) {
+        client.refreshNoteLock(note.id, editorSessionId).catch(() => { lockHeld.current = false; });
+      }
+    }, 30000);
+    return () => {
+      clearInterval(iv);
+      if (lockHeld.current && note?.id != null) {
+        client.releaseNoteLock(note.id, editorSessionId).catch(() => {});
+        lockHeld.current = false;
+      }
+    };
+  }, [note?.id, client, editorSessionId]);
 
   // Beim Schließen: ausstehenden Autosave nicht verwerfen, sondern speichern
   const persistRef = useRef(persist);
@@ -445,6 +505,78 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     } catch {}
   };
 
+  // --- Export (Markdown/HTML über den Server, dann Teilen-Menü) ---
+  const exportNoteAs = async (format: 'markdown' | 'html') => {
+    if (noteId == null) return;
+    try {
+      const text = await client.exportNote(noteId, format);
+      const safeName = (latest.current.heading || 'notiz').replace(/[/\\?%*:|"<>\n]/g, '_').slice(0, 60) || 'notiz';
+      const path = `${FileSystem.cacheDirectory}${safeName}.${format === 'markdown' ? 'md' : 'html'}`;
+      await FileSystem.writeAsStringAsync(path, text, { encoding: FileSystem.EncodingType.UTF8 });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, {
+          mimeType: format === 'markdown' ? 'text/markdown' : 'text/html',
+          dialogTitle: safeName,
+        });
+      } else {
+        Alert.alert('🪶', t('editor.exported'));
+      }
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const exportNote = () => {
+    Alert.alert(t('editor.export'), '', [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('editor.exportMd'), onPress: () => exportNoteAs('markdown') },
+      { text: t('editor.exportHtml'), onPress: () => exportNoteAs('html') },
+    ]);
+  };
+
+  // --- Anhang hochladen (Document-Picker -> multipart) ---
+  const pickAttachment = async () => {
+    if (noteId == null || uploading) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+      if (res.canceled || !res.assets?.length) return;
+      const asset = res.assets[0];
+      setUploading(true);
+      await client.uploadAttachment(noteId, {
+        uri: asset.uri,
+        name: asset.name ?? 'anhang',
+        mimeType: asset.mimeType ?? undefined,
+      });
+      const atts = await client.listAttachments(noteId);
+      setAttachments(atts.attachments ?? []);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('🪶', t('editor.uploaded'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const confirmDeleteAttachment = (att: Attachment) => {
+    if (noteId == null) return;
+    Alert.alert(t('editor.attachDelete'), att.original_filename || att.filename, [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await client.deleteAttachment(noteId, att.id);
+            setAttachments((prev) => prev.filter((a) => a.id !== att.id));
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
+
   // --- Karten-Farbe ---
   const applyColor = async (hex: string) => {
     if (noteId == null) return;
@@ -545,6 +677,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const statusLabel =
     saveState === 'saving' ? t('editor.saving') :
     saveState === 'saved' ? t('editor.saved') :
+    saveState === 'queued' ? t('editor.queued') :
     saveState === 'dirty' ? t('editor.unsaved') : '';
 
   if (!loaded) {
@@ -655,6 +788,16 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <Text style={styles.actionChipIcon}>📦</Text>
             <Text style={[styles.actionChipText, styles.actionChipTextDanger]}>{t('editor.archive')}</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.actionChip} onPress={exportNote}>
+            <Text style={styles.actionChipIcon}>📤</Text>
+            <Text style={styles.actionChipText}>{t('editor.export')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionChip, uploading && { opacity: 0.6 }]} onPress={pickAttachment} disabled={uploading}>
+            {uploading
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <Text style={styles.actionChipIcon}>📎</Text>}
+            <Text style={styles.actionChipText}>{uploading ? t('editor.uploading') : t('editor.addAttachment')}</Text>
+          </TouchableOpacity>
           <View style={styles.colorRow}>
             <Text style={styles.actionChipIcon}>🎨</Text>
             {NOTE_COLORS.map((c) => (
@@ -679,6 +822,26 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <Text style={styles.actionChipText}>{t('templates.apply')}</Text>
           </TouchableOpacity>
         </ScrollView>
+      )}
+      {saveState === 'queued' && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            📴 {t('editor.queued')} — {t('editor.queuedHint')}
+          </Text>
+        </View>
+      )}
+      {foreignLock && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            {t('editor.lockBanner', {
+              who: foreignLock.holder_is_current_user
+                ? t('editor.lockByYou')
+                : foreignLock.holder_is_public
+                  ? t('editor.lockByPublic')
+                  : foreignLock.holder_username ?? '?',
+            })}
+          </Text>
+        </View>
       )}
       {serverLocked && (
         <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
@@ -745,7 +908,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <Text style={styles.attachTitle}>📎 {t('editor.attachments')} ({attachments.length})</Text>
             <View style={styles.attachRow}>
               {attachments.map((att) => (
-                <TouchableOpacity key={att.id} style={styles.attachChip} onPress={() => openAttachment(att)} activeOpacity={0.7}>
+                <TouchableOpacity key={att.id} style={styles.attachChip} onPress={() => openAttachment(att)} onLongPress={() => confirmDeleteAttachment(att)} activeOpacity={0.7}>
                   <Text style={styles.attachName} numberOfLines={1}>{att.original_filename || att.filename}</Text>
                   {att.file_size != null ? (
                     <Text style={styles.attachSize}>{att.file_size >= 1048576 ? `${(att.file_size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(att.file_size / 1024))} KB`}</Text>
