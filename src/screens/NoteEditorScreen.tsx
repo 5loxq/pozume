@@ -250,6 +250,29 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   // Prompt-Dialoge (plattformübergreifend, ersetzt iOS-only Alert.prompt)
   const [promptKind, setPromptKind] = useState<'pin' | 'reminder' | null>(null);
   const [promptValue, setPromptValue] = useState('');
+  // In-Notiz-Suche: Treffer im Inhalt markieren und durchspringen
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findIndex, setFindIndex] = useState(0);
+  const [findSelection, setFindSelection] = useState<{ start: number; end: number } | undefined>(undefined);
+  const findMatches = useMemo(() => {
+    const q = findQuery.toLowerCase();
+    if (!q) return [] as Array<{ start: number; end: number }>;
+    const hay = latest.current.content.toLowerCase();
+    const out: Array<{ start: number; end: number }> = [];
+    let i = hay.indexOf(q);
+    while (i >= 0 && out.length < 500) {
+      out.push({ start: i, end: i + q.length });
+      i = hay.indexOf(q, i + q.length);
+    }
+    return out;
+  }, [findQuery, content]);
+  const gotoMatch = (idx: number) => {
+    if (findMatches.length === 0) { setFindSelection(undefined); return; }
+    const safe = ((idx % findMatches.length) + findMatches.length) % findMatches.length;
+    setFindIndex(safe);
+    setFindSelection(findMatches[safe]);
+  };
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
@@ -763,6 +786,9 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
         {!isNew && (
           <View style={styles.actions}>
+            <TouchableOpacity onPress={() => { setFindOpen((v) => !v); if (!findOpen) { setFindQuery(''); setFindSelection(undefined); } }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.folderIcon}>🔍</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={shareNote} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.folderIcon}>↗</Text>
             </TouchableOpacity>
@@ -858,6 +884,33 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </TouchableOpacity>
         </ScrollView>
       )}
+      {findOpen && (
+        <View style={styles.findBar}>
+          <TextInput
+            style={styles.findInput}
+            placeholder={t('editor.find')}
+            placeholderTextColor={colors.textFaint}
+            value={findQuery}
+            onChangeText={(v) => { setFindQuery(v); setFindIndex(0); setFindSelection(undefined); }}
+            onSubmitEditing={() => gotoMatch(findIndex)}
+            returnKeyType="search"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={styles.findCount}>
+            {findMatches.length > 0 ? `${findIndex + 1}/${findMatches.length}` : (findQuery ? '0' : '')}
+          </Text>
+          <TouchableOpacity style={styles.findBtn} onPress={() => gotoMatch(findIndex - 1)} disabled={findMatches.length === 0}>
+            <Text style={styles.findBtnText}>↑</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.findBtn} onPress={() => gotoMatch(findIndex + 1)} disabled={findMatches.length === 0}>
+            <Text style={styles.findBtnText}>↓</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.findBtn} onPress={() => { setFindOpen(false); setFindSelection(undefined); }}>
+            <Text style={styles.findBtnText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {saveState === 'queued' && (
         <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
           <Text style={{ color: colors.primary, fontSize: 13 }}>
@@ -917,7 +970,8 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             placeholder={t('editor.contentPlaceholder')}
             placeholderTextColor={colors.textFaint}
             value={content}
-            onChangeText={(v) => { setContent(v); scheduleSave(); }}
+            onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
+            selection={findSelection}
             editable={!serverLocked}
             multiline
             textAlignVertical="top"
@@ -1035,6 +1089,18 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
 const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   missingBanner: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  findBar: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  findInput: {
+    flex: 1, backgroundColor: colors.bg, borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg, paddingVertical: 6, fontSize: 14, color: colors.text,
+  },
+  findCount: { fontSize: 12, color: colors.textFaint, minWidth: 34, textAlign: 'center' },
+  findBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  findBtnText: { fontSize: 15, color: colors.primary, fontWeight: '700' },
   pinTopBar: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   topBar: {
     flexDirection: 'row', alignItems: 'center',

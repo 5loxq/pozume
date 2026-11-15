@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, RefreshControl,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, RefreshControl, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePalette, spacing, radius, typeFor, shadow,
@@ -22,7 +22,17 @@ export default function TrashScreen({ client, onBack }: Props) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
   const locale = getLocale();
+
+  // Lokale Suche im Papierkorb (Titel + Inhalt)
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return notes;
+    return notes.filter((n) =>
+      (n.heading ?? '').toLowerCase().includes(q) ||
+      (n.content ?? '').toLowerCase().includes(q));
+  }, [notes, search]);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
@@ -114,11 +124,20 @@ export default function TrashScreen({ client, onBack }: Props) {
           <View style={{ width: 40 }} />
         )}
       </View>
+      <TextInput
+        style={styles.searchInput}
+        placeholder={t('list.searchPlaceholder')}
+        placeholderTextColor={colors.textFaint}
+        value={search}
+        onChangeText={setSearch}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : (
         <FlatList
-          data={notes}
+          data={visible}
           keyExtractor={(n) => String(n.id)}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
@@ -143,6 +162,12 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   header: {
     flexDirection: 'row', alignItems: 'center',
     padding: spacing.lg,
+  },
+  searchInput: {
+    backgroundColor: colors.surface, borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    fontSize: 15, color: colors.text,
+    marginHorizontal: spacing.lg, marginBottom: spacing.md,
   },
   back: { fontSize: 28, color: colors.text, width: 40 },
   title: { ...type.title, fontSize: 24, flex: 1, textAlign: 'center' },

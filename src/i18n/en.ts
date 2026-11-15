@@ -223,6 +223,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.serverVersion': 'Server version',
   'settings.upToDate': 'up to date',
   'settings.updateAvailable': 'Update available: {v}',
+  'editor.find': 'Find in text…',
   'editor.queued': 'Saved offline',
   'editor.queuedHint': 'Changes will sync as soon as the server is reachable again.',
   'offline.flushed': '{n} offline change(s) synced',

@@ -221,6 +221,7 @@ export const de = {
   'settings.serverVersion': 'Server-Version',
   'settings.upToDate': 'aktuell',
   'settings.updateAvailable': 'Update verfügbar: {v}',
+  'editor.find': 'Im Text suchen…',
   'editor.queued': 'Offline gespeichert',
   'editor.queuedHint': 'Änderungen werden synchronisiert, sobald der Server wieder erreichbar ist.',
   'offline.flushed': '{n} offline gespeicherte Änderung(en) synchronisiert',

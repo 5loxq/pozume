@@ -13,6 +13,7 @@ import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
 import { readCachedNotes, cacheNotes } from '../api/cache';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { readDrawingCache, writeDrawingCache } from '../api/drawCache';
 import { isDrawingContent } from '../components/DrawingEditor';
 
@@ -52,6 +53,21 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const [searchQuery, setSearchQuery] = useState('');
   const [showFavorites, setShowFavorites] = useState(false);
   const [sortBy, setSortBy] = useState<'updated' | 'created' | 'title'>('updated');
+  // Sortierung und Favoriten-Filter über Sitzungen hinweg merken
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('pozume.list.prefs');
+        if (!raw) return;
+        const prefs = JSON.parse(raw);
+        if (prefs.sortBy === 'updated' || prefs.sortBy === 'created' || prefs.sortBy === 'title') setSortBy(prefs.sortBy);
+        if (typeof prefs.showFavorites === 'boolean') setShowFavorites(prefs.showFavorites);
+      } catch {}
+    })();
+  }, []);
+  const savePrefs = (next: { sortBy?: typeof sortBy; showFavorites?: boolean }) => {
+    AsyncStorage.setItem('pozume.list.prefs', JSON.stringify({ sortBy, showFavorites, ...next })).catch(() => {});
+  };
   const [menuNote, setMenuNote] = useState<Note | null>(null);
   // Zeichnungsinhalte für Karten-Vorschauen (noteId -> Inhalt), aus Cache + Hintergrund-Nachladen
   const [drawings, setDrawings] = useState<Record<number, string>>({});
@@ -293,22 +309,22 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       <View style={styles.filterRow}>
         <TouchableOpacity
           style={[styles.chip, !showFavorites && styles.chipActive]}
-          onPress={() => setShowFavorites(false)}>
+          onPress={() => { setShowFavorites(false); savePrefs({ showFavorites: false }); }}>
           <Text style={[styles.chipText, !showFavorites && styles.chipTextActive]}>{t('list.allNotes')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.chip, showFavorites && styles.chipActive]}
-          onPress={() => setShowFavorites(true)}>
+          onPress={() => { setShowFavorites(true); savePrefs({ showFavorites: true }); }}>
           <Text style={[styles.chipText, showFavorites && styles.chipTextActive]}>★ {t('list.favorites')}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.chip, sortBy === 'title' && styles.chipActive]}
-          onPress={() => setSortBy((v) => (v === 'title' ? 'updated' : 'title'))}>
+          onPress={() => setSortBy((v) => { const n = v === 'title' ? 'updated' : 'title'; savePrefs({ sortBy: n }); return n; })}>
           <Text style={[styles.chipText, sortBy === 'title' && styles.chipTextActive]}>A–Z</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.chip, sortBy === 'created' && styles.chipActive]}
-          onPress={() => setSortBy((v) => (v === 'created' ? 'updated' : 'created'))}>
+          onPress={() => setSortBy((v) => { const n = v === 'created' ? 'updated' : 'created'; savePrefs({ sortBy: n }); return n; })}>
           <Text style={[styles.chipText, sortBy === 'created' && styles.chipTextActive]}>↑↓</Text>
         </TouchableOpacity>
       </View>

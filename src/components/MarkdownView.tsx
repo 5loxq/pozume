@@ -4,7 +4,39 @@ import { usePalette, spacing, typeFor,
   Palette,
 } from '../theme';
 
-/** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes */
+const KEYWORDS = new Set([
+  'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'switch', 'case',
+  'class', 'import', 'from', 'export', 'default', 'new', 'async', 'await', 'try', 'catch',
+  'finally', 'throw', 'typeof', 'instanceof', 'extends', 'implements', 'interface', 'type',
+  'enum', 'public', 'private', 'protected', 'static', 'void', 'def', 'lambda', 'elif',
+  'print', 'with', 'as', 'in', 'of', 'this', 'super', 'yield', 'do', 'struct', 'fn', 'match',
+]);
+const LITERALS = new Set(['true', 'false', 'null', 'undefined', 'None', 'True', 'False', 'NaN']);
+
+interface Token { text: string; kind: 'plain' | 'comment' | 'string' | 'number' | 'keyword' | 'literal' }
+
+/** Eine Code-Zeile in farbige Segmente zerlegen (Strings, Kommentare, Zahlen, Schlüsselwörter) */
+function tokenizeLine(line: string): Token[] {
+  const re = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_$][\w$]*)/g;
+  const out: Token[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) out.push({ text: line.slice(last, m.index), kind: 'plain' });
+    if (m[1]) out.push({ text: m[1], kind: 'comment' });
+    else if (m[2]) out.push({ text: m[2], kind: 'string' });
+    else if (m[3]) out.push({ text: m[3], kind: 'number' });
+    else {
+      const word = m[4];
+      out.push({ text: word, kind: KEYWORDS.has(word) ? 'keyword' : LITERALS.has(word) ? 'literal' : 'plain' });
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) out.push({ text: line.slice(last), kind: 'plain' });
+  return out;
+}
+
+/** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes, Code-Blöcke */
 export default function MarkdownView({ content }: { content: string }) {
   const colors = usePalette();
   const type = typeFor(colors);
@@ -26,41 +58,71 @@ export default function MarkdownView({ content }: { content: string }) {
     });
   };
 
-  lines.forEach((raw, idx) => {
-    const line = raw.trimEnd();
-    const key = `l${idx}`;
-    if (!line.trim()) { out.push(<View key={key} style={styles.gap} />); return; }
-    if (line.startsWith('### ')) {
-      out.push(<Text key={key} style={styles.h3}>{renderInline(line.slice(4), key)}</Text>);
-    } else if (line.startsWith('## ')) {
-      out.push(<Text key={key} style={styles.h2}>{renderInline(line.slice(3), key)}</Text>);
-    } else if (line.startsWith('# ')) {
-      out.push(<Text key={key} style={styles.h1}>{renderInline(line.slice(2), key)}</Text>);
-    } else if (line.startsWith('> ')) {
+  let i = 0;
+  let key = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const k = `l${key++}`;
+    // Eingezäunter Code-Block: ```lang ... ```
+    const fence = line.trim().match(/^```(\w*)$/);
+    if (fence) {
+      const lang = fence[1];
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // schließenden Zaun überspringen
       out.push(
-        <View key={key} style={styles.quote}>
-          <Text style={styles.quoteText}>{renderInline(line.slice(2), key)}</Text>
+        <View key={k} style={styles.codeBlock}>
+          {lang ? <Text style={styles.codeLang}>{lang}</Text> : null}
+          {codeLines.map((cl, ci) => (
+            <Text key={ci} style={styles.codeLine}>
+              {tokenizeLine(cl).map((tok, ti) => (
+                <Text key={ti} style={styles[`${tok.kind}Token` as const]}>{tok.text}</Text>
+              ))}
+              {'\n'}
+            </Text>
+          ))}
         </View>,
       );
-    } else if (/^[-*] /.test(line)) {
+      continue;
+    }
+    const trimmed = line.trimEnd();
+    if (!trimmed.trim()) { out.push(<View key={k} style={styles.gap} />); i++; continue; }
+    if (trimmed.startsWith('### ')) {
+      out.push(<Text key={k} style={styles.h3}>{renderInline(trimmed.slice(4), k)}</Text>);
+    } else if (trimmed.startsWith('## ')) {
+      out.push(<Text key={k} style={styles.h2}>{renderInline(trimmed.slice(3), k)}</Text>);
+    } else if (trimmed.startsWith('# ')) {
+      out.push(<Text key={k} style={styles.h1}>{renderInline(trimmed.slice(2), k)}</Text>);
+    } else if (trimmed.startsWith('> ')) {
       out.push(
-        <View key={key} style={styles.li}>
+        <View key={k} style={styles.quote}>
+          <Text style={styles.quoteText}>{renderInline(trimmed.slice(2), k)}</Text>
+        </View>,
+      );
+    } else if (/^[-*] /.test(trimmed)) {
+      out.push(
+        <View key={k} style={styles.li}>
           <Text style={styles.bullet}>•</Text>
-          <Text style={styles.liText}>{renderInline(line.slice(2), key)}</Text>
+          <Text style={styles.liText}>{renderInline(trimmed.slice(2), k)}</Text>
         </View>,
       );
-    } else if (/^\d+\. /.test(line)) {
-      const num = line.match(/^(\d+)\. /)?.[1];
+    } else if (/^\d+\. /.test(trimmed)) {
+      const num = trimmed.match(/^(\d+)\. /)?.[1];
       out.push(
-        <View key={key} style={styles.li}>
+        <View key={k} style={styles.li}>
           <Text style={styles.bullet}>{num}.</Text>
-          <Text style={styles.liText}>{renderInline(line.replace(/^\d+\. /, ''), key)}</Text>
+          <Text style={styles.liText}>{renderInline(trimmed.replace(/^\d+\. /, ''), k)}</Text>
         </View>,
       );
     } else {
-      out.push(<Text key={key} style={styles.para}>{renderInline(line, key)}</Text>);
+      out.push(<Text key={k} style={styles.para}>{renderInline(trimmed, k)}</Text>);
     }
-  });
+    i++;
+  }
 
   return <View>{out}</View>;
 }
@@ -78,4 +140,16 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   quote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: spacing.md, marginVertical: spacing.sm },
   quoteText: { ...type.body, color: colors.textMuted, fontStyle: 'italic' },
   gap: { height: spacing.sm },
+  codeBlock: {
+    backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, marginVertical: spacing.sm,
+  },
+  codeLang: { fontSize: 10, color: colors.textFaint, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  codeLine: { fontFamily: 'Menlo', fontSize: 13, lineHeight: 20, color: colors.text },
+  plainToken: {},
+  commentToken: { color: colors.textFaint, fontStyle: 'italic' },
+  stringToken: { color: colors.success },
+  numberToken: { color: colors.star },
+  keywordToken: { color: colors.primary, fontWeight: '700' },
+  literalToken: { color: colors.danger },
 });

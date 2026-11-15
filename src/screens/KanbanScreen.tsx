@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, useWindowDimensions,
+  View, Text, ScrollView, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, useWindowDimensions, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -20,9 +20,12 @@ interface Props {
   onBack: () => void;
 }
 
+interface ColumnBounds { id: number; x: number; y: number; w: number; h: number }
+
 /**
  * Kanban-Board: Unterordner des gewählten Ordners sind die Spalten,
- * die Notizen darin die Karten. Karte verschieben = folder_id wechseln.
+ * die Notizen darin die Karten. Karten lassen sich per Drag&Drop zwischen
+ * Spalten verschieben (folder_id-Wechsel); Long-Press öffnet alternativ ein Menü.
  */
 export default function KanbanScreen({ client, folderId, folderName, onOpenNote, onBack }: Props) {
   const colors = usePalette();
@@ -33,6 +36,10 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
   const [columns, setColumns] = useState<KanbanFolder[] | null>(null);
   const [cards, setCards] = useState<Record<number, Note[]>>({});
   const [loading, setLoading] = useState(true);
+  // Drag&Drop: schwebende Karte + Spaltengrenzen (Screen-Koordinaten)
+  const [drag, setDrag] = useState<{ note: Note; fromId: number; x: number; y: number } | null>(null);
+  const [bounds, setBounds] = useState<ColumnBounds[]>([]);
+  const columnRefs = useRef<Record<number, View | null>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,6 +78,48 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
 
   useEffect(() => { load(); }, [load]);
 
+  // --- Drag&Drop ---
+  const hoveredColumn = useMemo(() => {
+    if (!drag || bounds.length === 0) return null;
+    return bounds.find((b) => drag.x >= b.x && drag.x <= b.x + b.w && drag.y >= b.y && drag.y <= b.y + b.h)?.id ?? null;
+  }, [drag, bounds]);
+
+  const onDragStart = (note: Note, fromId: number, x: number, y: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Spaltengrenzen einmalig beim Greifen messen
+    const measured: ColumnBounds[] = [];
+    let pending = Object.keys(columnRefs.current).length;
+    if (pending === 0) { setDrag({ note, fromId, x, y }); return; }
+    for (const [idStr, ref] of Object.entries(columnRefs.current)) {
+      ref?.measureInWindow((bx, by, bw, bh) => {
+        measured.push({ id: Number(idStr), x: bx, y: by, w: bw, h: bh });
+        if (--pending === 0) {
+          setBounds(measured);
+          setDrag({ note, fromId, x, y });
+        }
+      });
+    }
+  };
+
+  const onDragMove = (x: number, y: number) => {
+    setDrag((d) => (d ? { ...d, x, y } : d));
+  };
+
+  const onDragEnd = async (note: Note, fromId: number, x: number, y: number) => {
+    setDrag(null);
+    setBounds([]);
+    if (x < 0 || y < 0) return; // abgebrochen
+    const target = bounds.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
+    if (!target || target.id === fromId) return;
+    try {
+      await client.updateNote(note.id, { folder_id: target.id });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      load();
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
   const moveCard = (note: Note, target: KanbanFolder) => {
     Alert.alert(t('kanban.moveTo'), `„${note.heading}" → ${target.name}`, [
       { text: t('common.cancel'), style: 'cancel' },
@@ -89,25 +138,19 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
     ]);
   };
 
-  const renderCard = (note: Note, column: KanbanFolder) => (
-    <TouchableOpacity
-      key={note.id}
-      style={[styles.card, shadow, note.color_hex ? { borderLeftColor: note.color_hex, borderLeftWidth: 4 } : null]}
-      activeOpacity={0.7}
-      onPress={() => onOpenNote(note)}
-      onLongPress={() => {
-        // Ziel-Spalte wählen (andere als die aktuelle)
-        const targets = (columns ?? []).filter((c) => c.id !== column.id);
-        if (targets.length === 0) return;
-        Alert.alert(t('kanban.moveTo'), note.heading, [
-          ...targets.slice(0, 5).map((c) => ({ text: c.name, onPress: () => moveCard(note, c) })),
-          { text: t('common.cancel'), style: 'cancel' },
-        ]);
-      }}
-    >
+  const cardMenu = (note: Note, column: KanbanFolder) => {
+    const targets = (columns ?? []).filter((c) => c.id !== column.id);
+    Alert.alert(t('kanban.moveTo'), note.heading, [
+      ...targets.slice(0, 5).map((c) => ({ text: c.name, onPress: () => moveCard(note, c) })),
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
+
+  const renderCardContent = (note: Note) => (
+    <View style={[styles.card, drag?.note.id === note.id && styles.cardDragging, note.color_hex ? { borderLeftColor: note.color_hex, borderLeftWidth: 4 } : null]}>
       <Text style={styles.cardTitle} numberOfLines={3}>{note.heading || '…'}</Text>
       {note.tags ? <Text style={styles.cardMeta} numberOfLines={1}>{note.tags}</Text> : null}
-    </TouchableOpacity>
+    </View>
   );
 
   return (
@@ -129,7 +172,11 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.board}>
           {columns.map((column) => (
-            <View key={column.id} style={[styles.column, { width: columnW }]}>
+            <View
+              key={column.id}
+              ref={(r) => { columnRefs.current[column.id] = r; }}
+              style={[styles.column, { width: columnW }, hoveredColumn === column.id && styles.columnHovered]}
+            >
               <View style={[styles.columnHeader, column.color_hex ? { borderLeftColor: column.color_hex, borderLeftWidth: 3 } : null]}>
                 <Text style={styles.columnTitle} numberOfLines={1}>{column.name}</Text>
                 <Text style={styles.columnCount}>{cards[column.id]?.length ?? 0}</Text>
@@ -137,7 +184,18 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
               <FlatList
                 data={cards[column.id] ?? []}
                 keyExtractor={(n) => String(n.id)}
-                renderItem={({ item }) => renderCard(item, column)}
+                renderItem={({ item }) => (
+                  <KanbanCard
+                    note={item}
+                    column={column}
+                    onPress={onOpenNote}
+                    onMenu={cardMenu}
+                    onDragStart={onDragStart}
+                    onDragMove={onDragMove}
+                    onDragEnd={onDragEnd}
+                    renderContent={renderCardContent}
+                  />
+                )}
                 contentContainerStyle={styles.columnList}
                 ListEmptyComponent={<Text style={styles.columnEmpty}>—</Text>}
               />
@@ -145,8 +203,73 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
           ))}
         </ScrollView>
       )}
+      {/* Schwebende Karte folgt dem Finger */}
+      {drag && (
+        <View pointerEvents="none" style={[styles.dragLayer, { left: drag.x - 110, top: drag.y - 24 }]}>
+          {renderCardContent(drag.note)}
+        </View>
+      )}
     </SafeAreaView>
   );
+}
+
+/** Karte mit eigener Gesten-Erkennung: Tap = öffnen, Long-Press = Menü, Ziehen = Drag&Drop */
+function KanbanCard({ note, column, onPress, onMenu, onDragStart, onDragMove, onDragEnd, renderContent }: {
+  note: Note;
+  column: KanbanFolder;
+  onPress: (note: Note) => void;
+  onMenu: (note: Note, column: KanbanFolder) => void;
+  onDragStart: (note: Note, fromId: number, x: number, y: number) => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (note: Note, fromId: number, x: number, y: number) => void;
+  renderContent: (note: Note) => React.ReactNode;
+}) {
+  const gesture = useRef({ x: 0, y: 0, t: 0, dragging: false, longFired: false });
+  const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (e) => {
+      gesture.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, t: Date.now(), dragging: false, longFired: false };
+      longTimer.current = setTimeout(() => {
+        if (!gesture.current.dragging) {
+          gesture.current.longFired = true;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onMenu(note, column);
+        }
+      }, 550);
+    },
+    onPanResponderMove: (e) => {
+      const g = gesture.current;
+      const dx = e.nativeEvent.pageX - g.x;
+      const dy = e.nativeEvent.pageY - g.y;
+      if (!g.dragging && !g.longFired && (Math.abs(dx) > 12 || Math.abs(dy) > 12) && Date.now() - g.t > 150) {
+        g.dragging = true;
+        if (longTimer.current) clearTimeout(longTimer.current);
+        onDragStart(note, column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
+      } else if (g.dragging) {
+        onDragMove(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      }
+    },
+    onPanResponderRelease: (e) => {
+      if (longTimer.current) clearTimeout(longTimer.current);
+      const g = gesture.current;
+      if (g.dragging) {
+        onDragEnd(note, column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
+      } else if (!g.longFired && Date.now() - g.t < 400) {
+        onPress(note);
+      }
+      g.dragging = false;
+    },
+    onPanResponderTerminate: () => {
+      if (longTimer.current) clearTimeout(longTimer.current);
+      if (gesture.current.dragging) onDragEnd(note, column.id, -1, -1);
+      gesture.current.dragging = false;
+    },
+  })).current;
+
+  return <View {...pan.panHandlers}>{renderContent(note)}</View>;
 }
 
 const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
@@ -156,6 +279,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   title: { ...type.title, fontSize: 24, flex: 1, textAlign: 'center' },
   board: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, gap: spacing.md },
   column: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.sm, maxHeight: '100%' },
+  columnHovered: { borderWidth: 2, borderColor: colors.primary },
   columnHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.xs,
@@ -169,8 +293,15 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     borderWidth: 1, borderColor: colors.border,
     padding: spacing.md,
   },
+  cardDragging: { opacity: 0.35 },
   cardTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
   cardMeta: { fontSize: 11, color: colors.textFaint, marginTop: 3 },
+  dragLayer: {
+    position: 'absolute', width: 220,
+    transform: [{ scale: 1.05 }, { rotate: '-2deg' }],
+    ...shadow,
+    zIndex: 100, elevation: 10,
+  },
   center: { alignItems: 'center', paddingVertical: 80, paddingHorizontal: spacing.xl },
   emptyEmoji: { fontSize: 44, marginBottom: spacing.md },
   emptyText: { ...type.muted, textAlign: 'center' },
