@@ -6,5 +6,9 @@
     <array>
       <string>group.de.inthielligent.pozume</string>
     </array>
+    <key>keychain-access-groups</key>
+    <array>
+      <string>$(AppIdentifierPrefix)de.inthielligent.pozume</string>
+    </array>
   </dict>
 </plist>

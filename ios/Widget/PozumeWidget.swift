@@ -1,25 +1,62 @@
 import WidgetKit
 import SwiftUI
+import Security
 
 /**
  * Home-Screen-Widget für Pozume.
  *
  * Zeigt die neuesten Notizen des PozNote-Servers an (Small: 3, Medium: 5)
  * plus die Gesamtzahl der Notizen. Die Zugangsdaten stammen aus der App Group
- * (group.de.inthielligent.pozume), die von der Haupt-App beim Login
- * geschrieben werden — das Widget redet also direkt mit dem Server,
- * ohne die App öffnen zu müssen.
+ * (group.de.inthielligent.pozume, von der Haupt-App beim Login geschrieben):
+ * baseUrl + Benutzername aus dem UserDefaults der Gruppe, das Passwort aus
+ * der verschlüsselten gemeinsamen Keychain. Das Widget redet also direkt
+ * mit dem Server, ohne die App öffnen zu müssen.
  *
  * Auth: identisch zur App (Basic Auth + X-User-ID-Header).
  */
 
 // MARK: - Datenmodell
 
-/** Server-Zugangsdaten, von der Haupt-App als JSON in die App Group geschrieben. */
+/** Server-Adresse und Benutzername aus der App Group (unkritisch, JSON). */
 struct ServerConfig: Codable {
   let baseUrl: String
   let username: String
-  let password: String
+}
+
+/**
+ * Zugriff auf das Server-Passwort in der gemeinsamen Keychain.
+ * Die Access-Group ("TEAMID.de.inthielligent.pozume") hat die Haupt-App
+ * aufgelöst und in der App Group hinterlegt (Schlüssel "pozume.keychainGroup");
+ * im Simulator fallback ohne Team-Präfix.
+ */
+enum KeychainStore {
+  private static let keychainService = "pozume.server"
+  private static let keychainAccount = "password"
+  private static let fallbackGroup = "de.inthielligent.pozume"
+
+  /** Von der Haupt-App aufgelöste Access-Group aus der App Group lesen. */
+  private static var accessGroup: String {
+    UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.keychainGroup") ?? fallbackGroup
+  }
+
+  /** Liest das Passwort aus der Keychain; nil, wenn keins gespeichert ist. */
+  static func readPassword() -> String? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: keychainService,
+      kSecAttrAccount as String: keychainAccount,
+      kSecAttrAccessGroup as String: accessGroup,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+          let data = item as? Data,
+          let password = String(data: data, encoding: .utf8) else {
+      return nil
+    }
+    return password
+  }
 }
 
 /** Eine Notiz für die Anzeige im Widget (nur die Felder, die das Widget braucht). */
@@ -52,7 +89,7 @@ struct NoteEntry: TimelineEntry {
 /** Lädt Notizen vom PozNote-Server; alle Zugriffe laufen über URLSession. */
 enum NoteFetcher {
 
-  /** Server-Konfiguration aus der App Group lesen; nil, wenn noch nicht angemeldet. */
+  /** Server-Adresse + Benutzername aus der App Group lesen; nil, wenn noch nicht angemeldet. */
   static func loadConfig() -> ServerConfig? {
     guard
       let raw = UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.server"),
@@ -63,16 +100,17 @@ enum NoteFetcher {
 
   /**
    * Ruft die neuesten Notizen ab (GET /api/v1/notes?limit=N).
+   * Das Passwort kommt aus der gemeinsamen Keychain.
    * completion: (Notizen, Gesamtzahl, Fehlermeldung?)
    */
-  static func fetchNotes(config: ServerConfig, limit: Int = 5, completion: @escaping ([NoteItem], Int, String?) -> Void) {
+  static func fetchNotes(config: ServerConfig, password: String, limit: Int = 5, completion: @escaping ([NoteItem], Int, String?) -> Void) {
     guard let url = URL(string: "\(config.baseUrl)/api/v1/notes?limit=\(limit)") else {
       completion([], 0, "Ungültige Server-Adresse")
       return
     }
     var request = URLRequest(url: url, timeoutInterval: 12)
-    // Basic Auth aus der App-Group-Konfiguration
-    let raw = "\(config.username):\(config.password)".data(using: .utf8)?.base64EncodedString() ?? ""
+    // Basic Auth: Benutzername aus der App Group, Passwort aus der Keychain
+    let raw = "\(config.username):\(password)".data(using: .utf8)?.base64EncodedString() ?? ""
     request.setValue("Basic \(raw)", forHTTPHeaderField: "Authorization")
     request.setValue("1", forHTTPHeaderField: "X-User-ID")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -114,13 +152,14 @@ struct NoteProvider: TimelineProvider {
     }
   }
 
-  /** Gemeinsames Laden: erst Config prüfen, dann Notizen holen. */
+  /** Gemeinsames Laden: Config + Passwort prüfen, dann Notizen holen. */
   private func load(completion: @escaping (NoteEntry) -> Void) {
-    guard let config = NoteFetcher.loadConfig() else {
+    guard let config = NoteFetcher.loadConfig(),
+          let password = KeychainStore.readPassword() else {
       completion(NoteEntry(date: .now, notes: [], total: 0, error: "In der Pozume-App anmelden"))
       return
     }
-    NoteFetcher.fetchNotes(config: config) { notes, total, error in
+    NoteFetcher.fetchNotes(config: config, password: password) { notes, total, error in
       completion(NoteEntry(date: .now, notes: notes, total: total, error: error))
     }
   }

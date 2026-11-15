@@ -1,10 +1,13 @@
 import UIKit
 import UniformTypeIdentifiers
+import Security
 
 /**
  * Share-Extension: empfängt eine URL oder Text aus dem Teilen-Menü
  * (z.B. Safari) und legt sie als neue Notiz auf dem PozNote-Server ab.
- * Die Zugangsdaten kommen aus der App Group (von der Haupt-App geschrieben).
+ * Die Zugangsdaten stammen aus der App Group (baseUrl + Benutzername) und
+ * der verschlüsselten gemeinsamen Keychain (Passwort) — beides wird von
+ * der Haupt-App beim Login geschrieben.
  */
 class ShareViewController: UIViewController {
 
@@ -153,7 +156,7 @@ class ShareViewController: UIViewController {
     statusLabel.text = "Speichert…"
 
     // Ohne Anmeldung in der Haupt-App kann die Extension nichts speichern
-    guard let config = loadConfig() else {
+    guard let (config, password) = loadConfig() else {
       statusLabel.text = "Keine Anmeldung — bitte zuerst in der Pozume-App einloggen."
       saveButton.isEnabled = true
       return
@@ -175,7 +178,7 @@ class ShareViewController: UIViewController {
       return
     }
 
-    createNote(config: config, heading: heading, content: content) { [weak self] success, message in
+    createNote(config: config, password: password, heading: heading, content: content) { [weak self] success, message in
       DispatchQueue.main.async {
         guard let self else { return }
         if success {
@@ -192,13 +195,18 @@ class ShareViewController: UIViewController {
     }
   }
 
-  /** Server-Konfiguration aus der App Group lesen; nil, wenn noch nicht angemeldet. */
-  private func loadConfig() -> ServerConfig? {
+  /**
+   * Server-Adresse + Benutzername aus der App Group und Passwort aus der
+   * gemeinsamen Keychain lesen; nil, wenn noch nicht angemeldet.
+   */
+  private func loadConfig() -> (config: ServerConfig, password: String)? {
     guard
       let raw = UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.server"),
-      let data = raw.data(using: .utf8)
+      let data = raw.data(using: .utf8),
+      let config = try? JSONDecoder().decode(ServerConfig.self, from: data),
+      let password = KeychainStore.readPassword()
     else { return nil }
-    return try? JSONDecoder().decode(ServerConfig.self, from: data)
+    return (config, password)
   }
 
   /**
@@ -206,14 +214,14 @@ class ShareViewController: UIViewController {
    * Auth identisch zur App: Basic Auth + X-User-ID-Header.
    * completion: (Erfolg, Fehlermeldung)
    */
-  private func createNote(config: ServerConfig, heading: String, content: String, completion: @escaping (Bool, String) -> Void) {
+  private func createNote(config: ServerConfig, password: String, heading: String, content: String, completion: @escaping (Bool, String) -> Void) {
     guard let url = URL(string: "\(config.baseUrl)/api/v1/notes") else {
       completion(false, "Ungültige Server-Adresse")
       return
     }
     var request = URLRequest(url: url, timeoutInterval: 15)
     request.httpMethod = "POST"
-    let raw = "\(config.username):\(config.password)".data(using: .utf8)?.base64EncodedString() ?? ""
+    let raw = "\(config.username):\(password)".data(using: .utf8)?.base64EncodedString() ?? ""
     request.setValue("Basic \(raw)", forHTTPHeaderField: "Authorization")
     request.setValue("1", forHTTPHeaderField: "X-User-ID")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -243,9 +251,44 @@ class ShareViewController: UIViewController {
   }
 }
 
-/** Server-Zugangsdaten, von der Haupt-App als JSON in die App Group geschrieben. */
+/** Server-Adresse und Benutzername aus der App Group (unkritisch, JSON). */
 struct ServerConfig: Codable {
   let baseUrl: String
   let username: String
-  let password: String
+}
+
+/**
+ * Zugriff auf das Server-Passwort in der gemeinsamen Keychain.
+ * Die Access-Group ("TEAMID.de.inthielligent.pozume") hat die Haupt-App
+ * aufgelöst und in der App Group hinterlegt (Schlüssel "pozume.keychainGroup");
+ * im Simulator fallback ohne Team-Präfix.
+ */
+enum KeychainStore {
+  private static let keychainService = "pozume.server"
+  private static let keychainAccount = "password"
+  private static let fallbackGroup = "de.inthielligent.pozume"
+
+  /** Von der Haupt-App aufgelöste Access-Group aus der App Group lesen. */
+  private static var accessGroup: String {
+    UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.keychainGroup") ?? fallbackGroup
+  }
+
+  /** Liest das Passwort aus der Keychain; nil, wenn keins gespeichert ist. */
+  static func readPassword() -> String? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: keychainService,
+      kSecAttrAccount as String: keychainAccount,
+      kSecAttrAccessGroup as String: accessGroup,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+          let data = item as? Data,
+          let password = String(data: data, encoding: .utf8) else {
+      return nil
+    }
+    return password
+  }
 }

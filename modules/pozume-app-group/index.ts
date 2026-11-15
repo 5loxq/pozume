@@ -6,7 +6,11 @@ import { requireNativeModule } from 'expo-modules-core';
  */
 export const APP_GROUP = 'group.de.inthielligent.pozume';
 
-/** Schlüssel, unter dem die Server-Konfiguration (JSON) in der App Group liegt. */
+/**
+ * Schlüssel, unter dem die unkritische Server-Konfiguration (baseUrl +
+ * Benutzername, JSON) in der App Group liegt. Das Passwort liegt NICHT hier,
+ * sondern verschlüsselt in der gemeinsamen Keychain.
+ */
 const SERVER_CONFIG_KEY = 'pozume.server';
 
 /** Signatur des nativen PozumeAppGroup-Moduls (Swift-Seite). */
@@ -14,6 +18,9 @@ type PozumeAppGroupModule = {
   saveValue(key: string, value: string): boolean;
   readValue(key: string): string | null;
   removeValue(key: string): boolean;
+  savePassword(value: string): boolean;
+  readPassword(): string | null;
+  clearPassword(): boolean;
 };
 
 let nativeModule: PozumeAppGroupModule | null = null;
@@ -70,20 +77,51 @@ export function removeValue(key: string): boolean {
 }
 
 /**
- * Server-Konfiguration (als JSON) für Widget und Share-Extension in die App Group schreiben.
- * Wird beim Login/Boot der Haupt-App aufgerufen; Widget und Extension lesen sie
- * direkt (UserDefaults) und reden damit selbst mit dem PozNote-Server.
+ * Speichert das Server-Passwort verschlüsselt in der gemeinsamen Keychain
+ * (Access Group) — von Widget und Share-Extension direkt lesbar, taucht
+ * aber nicht in Klartext in Backups auf.
  * @returns true bei Erfolg.
  */
-export function saveServerConfig(cfg: { baseUrl: string; username: string; password: string }): boolean {
-  return saveValue(SERVER_CONFIG_KEY, JSON.stringify(cfg));
+export function savePassword(password: string): boolean {
+  try {
+    return mod()?.savePassword(password) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Server-Konfiguration aus der App Group löschen — beim Logout aufrufen,
- * damit Widget und Extension keine gültigen Zugangsdaten mehr haben.
+ * Löscht das Server-Passwort aus der Keychain.
  * @returns true bei Erfolg.
  */
+export function clearPassword(): boolean {
+  try {
+    return mod()?.clearPassword() ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Server-Zugangsdaten für Widget und Share-Extension verteilen:
+ * baseUrl + Benutzername gehen als JSON in die App Group (unkritisch),
+ * das Passwort in die verschlüsselte gemeinsame Keychain.
+ * Wird beim Login/Boot der Haupt-App aufgerufen.
+ * @returns true, wenn beide Schreibvorgänge erfolgreich waren.
+ */
+export function saveServerConfig(cfg: { baseUrl: string; username: string; password: string }): boolean {
+  const groupOk = saveValue(SERVER_CONFIG_KEY, JSON.stringify({ baseUrl: cfg.baseUrl, username: cfg.username }));
+  const keychainOk = savePassword(cfg.password);
+  return groupOk && keychainOk;
+}
+
+/**
+ * Alle verteilten Zugangsdaten löschen — beim Logout aufrufen,
+ * damit Widget und Share-Extension keine gültigen Zugänge mehr haben.
+ * @returns true, wenn beide Löschvorgänge erfolgreich waren.
+ */
 export function clearServerConfig(): boolean {
-  return removeValue(SERVER_CONFIG_KEY);
+  const groupOk = removeValue(SERVER_CONFIG_KEY);
+  const keychainOk = clearPassword();
+  return groupOk && keychainOk;
 }
