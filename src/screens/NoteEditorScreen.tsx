@@ -8,6 +8,7 @@ import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite } from '../api/offlineQueue';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
@@ -320,12 +321,25 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     return () => { cancelled = true; };
   }, [note?.id]);
 
-  // Gespuerrte Notiz: PIN verlangen (einmal pro Oeffnen)
+  // Gespuerrte Notiz: Face ID/Touch ID anbieten, sonst PIN (einmal pro Oeffnen)
   useEffect(() => {
     if (note?.id == null) return;
-    isNoteLocked(note.id).then((v) => {
-      if (v) { setLocked(true); setPinPrompt(true); }
-    });
+    (async () => {
+      if (!(await isNoteLocked(note.id))) return;
+      setLocked(true);
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        if (hasHardware && enrolled) {
+          const res = await LocalAuthentication.authenticateAsync({
+            promptMessage: 'Pozume',
+            cancelLabel: t('common.cancel'),
+          });
+          if (res.success) { setLocked(false); return; }
+        }
+      } catch {}
+      setPinPrompt(true); // Biometrie abgebrochen/fehlgeschlagen -> PIN
+    })();
     client.getShare(note.id)
       .then((r) => { setShared(!!(r.public ?? r.shared)); setSharedUrl(r.url ?? null); })
       .catch(() => {});

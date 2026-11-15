@@ -447,6 +447,14 @@ export class PoznoteClient {
     return this.req<{ success: boolean }>(`/folders/${id}`, { method: 'DELETE' });
   }
 
+  /** Ordner-Icon setzen (Lucide-Klassenname, leerer String = Standard) */
+  setFolderIcon(id: number, icon: string, iconColor?: string) {
+    return this.req<{ success: boolean }>(`/folders/${id}/icon`, {
+      method: 'PUT',
+      body: JSON.stringify({ icon, ...(iconColor ? { icon_color: iconColor } : {}) }),
+    });
+  }
+
   // --- System ---
   getSystemVersion() {
     return this.req<{ current_version?: string; latest_version?: string; is_up_to_date?: boolean }>('/system/version');

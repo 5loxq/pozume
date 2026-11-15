@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {useCallback, useEffect, useRef, useState, useMemo} from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, Alert, RefreshControl,
 } from 'react-native';
@@ -10,7 +10,16 @@ import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { readCachedFolders, cacheFolders } from '../api/cache';
 
-interface Folder { id: number; name: string; notes_count?: number; workspace?: string; color_hex?: string | null }
+interface Folder { id: number; name: string; notes_count?: number; workspace?: string; color_hex?: string | null; icon?: string | null }
+
+/** Lucide-Icon-Klassen des Servers -> Emoji für die App-Anzeige */
+const FOLDER_ICONS: Array<[string, string]> = [
+  ['lucide-briefcase', '💼'], ['lucide-home', '🏠'], ['lucide-lightbulb', '💡'],
+  ['lucide-heart', '❤️'], ['lucide-rocket', '🚀'], ['lucide-book', '📚'],
+  ['lucide-code', '💻'], ['lucide-shopping-cart', '🛒'], ['lucide-calendar', '📅'],
+  ['lucide-star', '⭐'],
+];
+const iconToEmoji = (icon?: string | null) => FOLDER_ICONS.find(([k]) => k === icon)?.[1] ?? '📁';
 
 interface Props {
   client: PoznoteClient;
@@ -22,7 +31,8 @@ interface Props {
 export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -108,14 +118,40 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
   const folderMenu = (folder: Folder) => {
     Alert.alert(folder.name, '', [
       { text: t('folders.openKanban'), onPress: () => onOpenKanban(folder) },
+      { text: t('folders.setIcon'), onPress: () => pickIcon(folder) },
       { text: t('common.delete'), style: 'destructive', onPress: () => confirmDeleteFolder(folder) },
+      { text: t('common.cancel'), style: 'cancel' },
+    ]);
+  };
+
+  const pickIcon = (folder: Folder) => {
+    Alert.alert(t('folders.setIcon'), folder.name, [
+      ...FOLDER_ICONS.map(([key, emoji]) => ({
+        text: emoji,
+        onPress: async () => {
+          try {
+            await client.setFolderIcon(folder.id, key);
+            load({ silent: true });
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      })),
+      { text: '📁 ' + t('folders.resetIcon'), onPress: async () => {
+        try {
+          await client.setFolderIcon(folder.id, '');
+          load({ silent: true });
+        } catch (e: any) {
+          Alert.alert(t('common.error'), e?.message ?? String(e));
+        }
+      } },
       { text: t('common.cancel'), style: 'cancel' },
     ]);
   };
 
   const renderFolder = ({ item }: { item: Folder }) => (
     <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)} onLongPress={() => folderMenu(item)}>
-      <Text style={[styles.icon, item.color_hex ? { color: item.color_hex } : null]}>📁</Text>
+      <Text style={[styles.icon, item.color_hex ? { color: item.color_hex } : null]}>{iconToEmoji(item.icon)}</Text>
       <View style={styles.nameWrap}>
         <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
         {item.workspace ? <Text style={styles.wsLabel} numberOfLines={1}>{item.workspace}</Text> : null}

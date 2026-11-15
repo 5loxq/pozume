@@ -1,11 +1,13 @@
 import { de, TranslationKey } from './de';
 import { en } from './en';
+import { fr } from './fr';
+import { es } from './es';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { I18nManager } from 'react-native';
 
-export type Locale = 'de' | 'en';
+export type Locale = 'de' | 'en' | 'fr' | 'es';
 export type LocaleMode = 'auto' | Locale;
-const dicts: Record<Locale, Record<TranslationKey, string>> = { de, en };
+const dicts: Record<Locale, Record<TranslationKey, string>> = { de, en, fr, es };
 
 let override: LocaleMode | null = null;
 const listeners = new Set<() => void>();
@@ -28,11 +30,14 @@ export function onLocaleChange(fn: () => void): () => void {
 }
 
 export function getLocale(): Locale {
-  if (override === 'de' || override === 'en') return override;
+  if (override === 'de' || override === 'en' || override === 'fr' || override === 'es') return override;
   // React Native hat kein `navigator`-Global; die Systemsprache steht nur nativ
   // (aus den RN-Typen entfernt, zur Laufzeit aber vorhanden).
-  const tag = (I18nManager as any).localeIdentifier || 'de';
-  return String(tag).toLowerCase().startsWith('en') ? 'en' : 'de';
+  const tag = String((I18nManager as any).localeIdentifier || 'de').toLowerCase();
+  if (tag.startsWith('en')) return 'en';
+  if (tag.startsWith('fr')) return 'fr';
+  if (tag.startsWith('es')) return 'es';
+  return 'de';
 }
 
 export function getLocaleMode(): LocaleMode {

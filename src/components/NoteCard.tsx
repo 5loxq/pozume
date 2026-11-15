@@ -19,10 +19,13 @@ interface Props {
   onLongPress?: (note: Note) => void;
   /** Zeichnungsinhalt (aus lokalem Cache), für die Vorschau auf der Karte */
   drawingContent?: string;
+  /** Multi-Select: Karte tippt an/ab statt zu öffnen */
+  selectMode?: boolean;
+  selected?: boolean;
 }
 
 /** React.memo: Karte rendert nur, wenn sich die Notiz (oder ein Callback) ändert */
-const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPress, onLongPress, drawingContent }: Props) {
+const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPress, onLongPress, drawingContent, selectMode, selected }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -38,7 +41,11 @@ const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPres
       onLongPress={onLongPress ? () => onLongPress(note) : undefined}
     >
       <View style={styles.headerRow}>
-        {note.pinned ? <Text style={styles.pin}>📌</Text> : null}
+        {selectMode ? (
+          <Text style={[styles.selectBox, selected && styles.selectBoxActive]}>
+            {selected ? '✓' : ''}
+          </Text>
+        ) : note.pinned ? <Text style={styles.pin}>📌</Text> : null}
         <Text style={styles.title} numberOfLines={2}>{note.heading || '…'}</Text>
         {note.favorite ? <Text style={styles.icons}>★</Text> : null}
       </View>
@@ -80,6 +87,12 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
   pin: { fontSize: 13, marginRight: spacing.sm, marginTop: 2 },
+  selectBox: {
+    width: 22, height: 22, borderRadius: 11, marginRight: spacing.sm, marginTop: 2,
+    borderWidth: 2, borderColor: '#c8ccd6', color: '#fff',
+    textAlign: 'center', lineHeight: 19, fontSize: 13, fontWeight: '800', overflow: 'hidden',
+  },
+  selectBoxActive: { borderColor: '#4f46e5', backgroundColor: '#4f46e5' },
   title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
   icons: { fontSize: 15, marginLeft: spacing.sm, color: colors.star },
   excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 20 },

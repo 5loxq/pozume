@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {useEffect, useRef, useState, useMemo} from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList,
   KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator,
@@ -19,10 +19,11 @@ interface Props {
   onBack: () => void;
 }
 
-export default function AiScreen({ notes, onBack }: Props) {
+export default function AiScreen({ client, notes, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -43,6 +44,21 @@ export default function AiScreen({ notes, onBack }: Props) {
     });
   }, []);
 
+  // KI-Kontext: Die Notizliste liefert keinen Inhalt — die der neuesten
+  // Notizen einmal pro Screen-Besuch nachladen (max. 15, im Hintergrund).
+  const [richNotes, setRichNotes] = useState<Note[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const base = notes.slice(0, 15);
+      const details = await Promise.all(base.map((bn) => client.getNote(bn.id).catch(() => null)));
+      const enriched = base
+        .map((bn, i) => ({ ...bn, content: details[i]?.note?.content ?? bn.content }));
+      if (!cancelled) setRichNotes(enriched);
+    })();
+    return () => { cancelled = true; };
+  }, [notes, client]);
+
   const saveConfig = async () => {
     if (!fBaseUrl.trim() || !fKey.trim() || !fModel.trim()) {
       Alert.alert(t('common.error'), 'Bitte alle Felder ausfüllen.');
@@ -56,9 +72,10 @@ export default function AiScreen({ notes, onBack }: Props) {
   };
 
   const noteContext = (): string => {
-    if (notes.length === 0) return '';
-    const list = notes.slice(0, 40).map((n) => {
-      const ex = (n.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const source = richNotes.length > 0 ? richNotes : notes;
+    if (source.length === 0) return '';
+    const list = source.slice(0, 40).map((n) => {
+      const ex = (n.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
       return `- „${n.heading}" (#${n.id})${ex ? ': ' + ex : ''}`;
     }).join('\n');
     return `\n\n[Kontext: Die letzten Notizen des Nutzers auf Poznote:\n${list}\n]`;

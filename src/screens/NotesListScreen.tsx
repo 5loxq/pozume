@@ -16,6 +16,7 @@ import { readCachedNotes, cacheNotes } from '../api/cache';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { readDrawingCache, writeDrawingCache } from '../api/drawCache';
 import { isDrawingContent } from '../components/DrawingEditor';
+import FolderPickerSheet from '../components/FolderPickerSheet';
 
 interface Props {
   client: PoznoteClient;
@@ -69,15 +70,22 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     AsyncStorage.setItem('pozume.list.prefs', JSON.stringify({ sortBy, showFavorites, ...next })).catch(() => {});
   };
   const [menuNote, setMenuNote] = useState<Note | null>(null);
+  // Multi-Select: null = normaler Modus, sonst Menge der ausgewählten Notiz-IDs
+  const [selection, setSelection] = useState<Set<number> | null>(null);
+  const [showMoveSheet, setShowMoveSheet] = useState(false);
   // Zeichnungsinhalte für Karten-Vorschauen (noteId -> Inhalt), aus Cache + Hintergrund-Nachladen
   const [drawings, setDrawings] = useState<Record<number, string>>({});
 
   const showNoteMenu = (n: Note) => setMenuNote(n);
 
-  const menuAction = async (action: 'pin' | 'duplicate' | 'share') => {
+  const menuAction = async (action: 'pin' | 'duplicate' | 'share' | 'select') => {
     const n = menuNote;
     setMenuNote(null);
     if (!n) return;
+    if (action === 'select') {
+      setSelection(new Set([n.id]));
+      return;
+    }
     try {
       if (action === 'pin') {
         await client.setPinned(n.id, !n.pinned);
@@ -211,6 +219,60 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     })();
     return () => { cancelled = true; };
   }, [notes, client]);
+
+  const toggleSelect = (id: number) => {
+    setSelection((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const bulkPin = async () => {
+    if (!selection) return;
+    try {
+      await Promise.all([...selection].map((id) => client.setPinned(id, true)));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSelection(null);
+      load({ silent: true });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const bulkMove = async (targetId: number | null) => {
+    setShowMoveSheet(false);
+    if (!selection) return;
+    try {
+      await Promise.all([...selection].map((id) => client.updateNote(id, { folder_id: targetId })));
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSelection(null);
+      load({ silent: true });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const bulkDelete = () => {
+    if (!selection || selection.size === 0) return;
+    Alert.alert(t('select.deleteTitle'), t('select.deleteText'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'), style: 'destructive',
+        onPress: async () => {
+          try {
+            await Promise.all([...selection].map((id) => client.deleteNote(id)));
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setSelection(null);
+            load({ silent: true });
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
 
   const visible = useMemo(() => {
     let out = notes;
@@ -376,7 +438,16 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         data={visible}
         keyExtractor={(n) => String(n.id)}
         renderItem={({ item }) => (
-          <NoteCard note={item} locale={locale} onPress={onOpenNote} onTagPress={onTagPress} onLongPress={showNoteMenu} drawingContent={drawings[item.id]} />
+          <NoteCard
+            note={item}
+            locale={locale}
+            onPress={selection ? () => toggleSelect(item.id) : onOpenNote}
+            onTagPress={onTagPress}
+            onLongPress={showNoteMenu}
+            drawingContent={drawings[item.id]}
+            selectMode={selection != null}
+            selected={selection?.has(item.id) ?? false}
+          />
         )}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}
@@ -387,6 +458,30 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
           <RefreshControl refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); load({ silent: true }); }} />
         }
+      />
+      {selection != null && (
+        <View style={[styles.selectBar, shadow]}>
+          <Text style={styles.selectCount}>{t('select.count', { n: selection.size })}</Text>
+          <TouchableOpacity style={styles.selectBtn} onPress={bulkPin}>
+            <Text style={styles.selectBtnText}>📌 {t('select.pin')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectBtn} onPress={() => setShowMoveSheet(true)}>
+            <Text style={styles.selectBtnText}>📁 {t('select.move')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.selectBtn, styles.selectBtnDanger]} onPress={bulkDelete}>
+            <Text style={[styles.selectBtnText, { color: colors.danger }]}>🗑</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectBtn} onPress={() => setSelection(null)}>
+            <Text style={styles.selectBtnText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      <FolderPickerSheet
+        visible={showMoveSheet}
+        client={client}
+        currentFolderId={null}
+        onSelect={bulkMove}
+        onClose={() => setShowMoveSheet(false)}
       />
       {onCreateDrawing ? (
         <TouchableOpacity style={[styles.fabDraw, shadow]} onPress={onCreateDrawing} activeOpacity={0.85}>
@@ -403,8 +498,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
             <TouchableOpacity style={styles.menuItem} onPress={() => menuAction('duplicate')}>
               <Text style={styles.menuItemText}>⧉ {t('menu.duplicate')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => menuAction('share')}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => menuAction('share')}>
               <Text style={styles.menuItemText}>🔗 {t('menu.shareLink')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => menuAction('select')}>
+              <Text style={styles.menuItemText}>☑️ {t('menu.select')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -460,6 +558,16 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   emptyEmoji: { fontSize: 44, marginBottom: spacing.md },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   emptyText: { ...type.muted, marginTop: spacing.xs, textAlign: 'center' },
+  selectBar: {
+    position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: spacing.xl,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+  },
+  selectCount: { fontSize: 13, fontWeight: '700', color: colors.text, flex: 1 },
+  selectBtn: { paddingVertical: 6, paddingHorizontal: spacing.sm },
+  selectBtnText: { fontSize: 13, fontWeight: '600', color: colors.primary },
+  selectBtnDanger: {},
   fab: {
     position: 'absolute', right: spacing.xl, bottom: spacing.xl,
     width: 60, height: 60, borderRadius: 30,

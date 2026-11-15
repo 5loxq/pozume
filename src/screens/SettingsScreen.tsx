@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, {useEffect, useState, useMemo} from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, Alert, ActivityIndicator,
 } from 'react-native';
@@ -13,6 +13,7 @@ import { t, Locale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } fr
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer, getAppLock } from '../api/store';
 import { base64FromBytes } from '../utils';
+import { readCrashLog, clearCrashLog, type CrashEntry } from '../api/crashLog';
 
 interface Props {
   client: PoznoteClient;
@@ -26,12 +27,14 @@ interface Props {
 export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onOpenArchive, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [lockEnabled, setLockEnabled] = useState(false);
   const [localeMode, setLocaleMode] = useState<LocaleMode>('auto');
   const [themeMode, setThemeMode] = useState<ThemeMode>('auto');
   const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [exporting, setExporting] = useState<'entries' | 'attachments' | null>(null);
+  const [crashCount, setCrashCount] = useState(0);
 
   useEffect(() => { loadLocaleOverride().then(setLocaleMode); }, []);
   useEffect(() => { setThemeMode(getThemeMode()); }, []);
@@ -43,6 +46,8 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
       .then((r) => setServerVersion(r.current_version ?? null))
       .catch(() => {});
   }, [client]);
+  // Absturzprotokoll: Anzahl für den Hinweis im Text
+  useEffect(() => { readCrashLog().then((e) => setCrashCount(e.length)); }, []);
 
   const setTheme = async (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -71,6 +76,20 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
           onLoggedOut();
         },
       },
+    ]);
+  };
+
+  const showCrashLog = async () => {
+    const entries: CrashEntry[] = await readCrashLog();
+    if (entries.length === 0) {
+      Alert.alert(t('settings.crashLog'), t('settings.crashEmpty'));
+      return;
+    }
+    const body = entries.slice(0, 5).map((e) =>
+      `${new Date(e.t).toLocaleString('de-DE')}${e.fatal ? ' ⚠' : ''}: ${e.message}`).join('\n\n');
+    Alert.alert(t('settings.crashLog'), body, [
+      { text: t('common.close'), style: 'cancel' },
+      { text: t('settings.crashClear'), style: 'destructive', onPress: async () => { await clearCrashLog(); setCrashCount(0); } },
     ]);
   };
 
@@ -126,6 +145,14 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
             <Text style={[styles.rowText, localeMode === 'en' && styles.active]}>🇬🇧 {t('settings.languageEn')}</Text>
             {localeMode === 'en' ? <Text style={styles.check}>✓</Text> : null}
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setLang('fr')}>
+            <Text style={[styles.rowText, localeMode === 'fr' && styles.active]}>🇫🇷 Français</Text>
+            {localeMode === 'fr' ? <Text style={styles.check}>✓</Text> : null}
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowLast]} onPress={() => setLang('es')}>
+            <Text style={[styles.rowText, localeMode === 'es' && styles.active]}>🇪🇸 Español</Text>
+            {localeMode === 'es' ? <Text style={styles.check}>✓</Text> : null}
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.section}>{t('settings.appearance')}</Text>
@@ -161,6 +188,13 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
           <View style={[styles.row, styles.rowLast]}>
             <Text style={styles.rowText}>📦 {t('settings.archive')}</Text>
             <Text style={styles.chevron}>›</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.card, shadow]} onPress={showCrashLog}>
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowText}>🩺 {t('settings.crashLog')}</Text>
+            <Text style={styles.serverText}>{crashCount > 0 ? crashCount : '—'}</Text>
           </View>
         </TouchableOpacity>
 

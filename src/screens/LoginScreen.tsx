@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useState, useMemo} from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePalette, spacing, radius, typeFor, shadowSoft, primaryButton,
@@ -11,7 +11,8 @@ import { saveServer } from '../api/store';
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [serverUrl, setServerUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');

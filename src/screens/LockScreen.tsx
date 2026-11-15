@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, {useEffect, useState, useMemo} from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { usePalette, spacing, typeFor,
@@ -11,7 +11,8 @@ interface Props { onUnlocked: () => void }
 export default function LockScreen({ onUnlocked }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [busy, setBusy] = useState(false);
 
   const authenticate = async () => {

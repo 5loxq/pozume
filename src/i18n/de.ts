@@ -267,5 +267,18 @@ export const de = {
   'folders.openKanban': 'Als Kanban öffnen',
   'settings.archive': 'Archivierte Notizen',
   'archive.title': 'Archiv',
+  'menu.select': 'Auswählen',
+  'select.count': '{n} ausgewählt',
+  'select.pin': 'Anpinnen',
+  'select.move': 'Verschieben',
+  'select.deleteTitle': 'Notizen löschen?',
+  'select.deleteText': 'Die ausgewählten Notizen wandern in den Papierkorb.',
+  'select.done': 'Fertig',
+  'ipad.pickNote': 'Wähle links eine Notiz aus — oder tippe auf ＋ für eine neue.',
+  'folders.setIcon': 'Icon wählen',
+  'folders.resetIcon': 'Standard',
+  'settings.crashLog': 'Absturzprotokoll',
+  'settings.crashEmpty': 'Keine Fehler aufgezeichnet.',
+  'settings.crashClear': 'Leeren',
 } as const;
 export type TranslationKey = keyof typeof de;

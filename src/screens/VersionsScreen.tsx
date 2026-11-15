@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, {useCallback, useEffect, useState, useMemo} from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
@@ -20,7 +20,8 @@ interface Props {
 export default function VersionsScreen({ client, noteId, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const locale = getLocale();
   const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([]);
   const [currentHash, setCurrentHash] = useState<string | undefined>();

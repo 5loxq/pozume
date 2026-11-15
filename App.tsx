@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, ActivityIndicator, useWindowDimensions, AppState, Alert } from 'react-native';
+import { View, Text, ActivityIndicator, useWindowDimensions, AppState, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import LoginScreen from './src/screens/LoginScreen';
@@ -19,6 +19,8 @@ import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
+import { installCrashHandler } from './src/api/crashLog';
+import * as Linking from 'expo-linking';
 import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
 import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
@@ -51,6 +53,21 @@ function AppInner() {
   const [dataVersion, setDataVersion] = useState(0);
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
+
+  // Absturzprotokoll: globale Fehler aufzeichnen (einmalig)
+  useEffect(() => { installCrashHandler(); }, []);
+
+  // Deep-Links: pozume://note/123 öffnet die Notiz direkt
+  useEffect(() => {
+    const open = (url?: string | null) => {
+      if (!url) return;
+      const m = url.match(/\/\/note\/(\d+)/);
+      if (m) setRoute({ name: 'editor', note: { id: Number(m[1]), heading: '' } });
+    };
+    Linking.getInitialURL().then(open).catch(() => {});
+    const sub = Linking.addEventListener('url', (e) => open(e.url));
+    return () => sub.remove();
+  }, []);
 
   // Boot: Zugangsdaten + App-Lock + Sprach-Override laden
   useEffect(() => {
@@ -355,6 +372,36 @@ function AppInner() {
           onBack={() => setRoute({ name: 'folders' })}
           refreshKey={dataVersion}
         />
+      </>
+    );
+  }
+
+  if (route.name === 'list' && isWide) {
+    return (
+      <>
+        <StatusBar style="auto" />
+        <View style={{ flex: 1, flexDirection: 'row', backgroundColor: palette.bg }}>
+          <View style={{ width: '42%', borderRightWidth: 1, borderRightColor: palette.border }}>
+            <NotesListScreen client={client} onOpenNote={openNote} onCreateNote={createNote}
+              onCreateDrawing={createDrawing}
+              onOpenFolders={() => setRoute({ name: 'folders' })}
+              onOpenTrash={() => setRoute({ name: 'trash' })}
+              onOpenSettings={() => setRoute({ name: 'settings' })}
+              onOpenAi={() => setRoute({ name: 'ai' })}
+              onOpenTasks={() => setRoute({ name: 'tasks' })}
+              onOpenTags={() => setRoute({ name: 'tags' })}
+              onOpenReminders={() => setRoute({ name: 'reminders' })}
+              onOpenGraph={() => setRoute({ name: 'graph' })}
+              onTagPress={(tag) => setRoute({ name: 'tagNotes', tag })}
+              refreshKey={dataVersion} />
+          </View>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 64, marginBottom: 16, opacity: 0.4 }}>🪶</Text>
+            <Text style={{ color: palette.textMuted, fontSize: 16 }}>
+              {t('ipad.pickNote')}
+            </Text>
+          </View>
+        </View>
       </>
     );
   }
