@@ -3,6 +3,18 @@
 Kommentierung aller Vorgänge der Pozume-Entwicklung (neueste zuerst).
 Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 
+## 2026-11-16 — P0/P1/P2-Abarbeitung: Verschluesselung, Redirect-Schutz, Ordnerhierarchie, Kamera, Share-Flow, Pagination, Notizlinks
+
+*Commit `63de35c`*
+
+Gesamtabarbeitung der restlichen Punkte der Entwicklungsliste gegen den Live-Server: P0-5 Verschluesselung aller lokalen Daten (AES-256-CTR, Schluessel in der Keychain, gegen Node-Referenz verifiziert), P0-4 Redirect-Schutz, P1-9 Ordnerhierarchie/Umbenennen/Verschieben, P1-8 Kamera/Upload-Wiederholung/Offline-Anhaenge, P1-12 Share-Extension mit Ordner-/Tag-Auswahl in der App, P1-10 Tag-Vorschlaege, P1-14 Pagination + Cache-Begrenzung, P1-11 Snapshot vor Wiederherstellung, P1-13 Faelligkeit setzen, P2-16 Notizlinks, P2-17 Freigabe-Erklaerung. Verifikation: tsc fehlerfrei, Smoke-Test 22/22.
+
+## 2026-11-16 — Changelog: Kommentierung aller Vorgaenge als normale Datei im Repo
+
+*Commit `0bcb675`*
+
+Changelog.md als normale Datei im Repository: dokumentiert alle bisherigen 42 Vorgaenge (Datum, Commit, Erklaerung) — dieselben Inhalte wie die Git-Notizen, aber ohne Sonderbehandlung beim Push.
+
 ## 2026-11-16 — Version 0.6.0 (iOS Build 4)
 
 *Commit `bf1a2b0`*
