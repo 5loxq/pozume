@@ -283,6 +283,7 @@ export const en: Record<TranslationKey, string> = {
   'settings.crashClear': 'Clear',
   'editor.loadFailedTitle': 'Could not load the note',
   'editor.loadFailedText': 'The content is unavailable without a server connection. Editing is only possible after loading so no content is lost.',
+  'editor.deleteQueued': 'Deleted offline — the deletion will sync on the next connection.',
   'editor.failed': 'Failed',
   'editor.draftRestored': 'Draft restored — unsaved changes from your last session',
   'editor.conflictPending': 'Offline change conflicts with a newer server version',

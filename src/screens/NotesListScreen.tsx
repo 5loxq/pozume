@@ -13,6 +13,7 @@ import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
 import { readCachedNotes, cacheNotes } from '../api/cache';
+import { pendingDeleteIds } from '../api/offlineQueue';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { readDrawingCache, writeDrawingCache } from '../api/drawCache';
 import { isDrawingContent } from '../components/DrawingEditor';
@@ -110,6 +111,8 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
     setError(null);
+    // Offline gelöschte Notizen ausblenden, bis der Server die Löschung übernommen hat
+    const hiddenDeletes = new Set(await pendingDeleteIds().catch(() => [] as number[]));
     try {
       const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(workspace ? { workspace } : {}), ...(tag ? { tags: tag } : {}) });
       let list = res.notes ?? [];
@@ -119,6 +122,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         list = list.filter((n) =>
           (n.tags ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(wanted));
       }
+      if (hiddenDeletes.size > 0) list = list.filter((n) => !hiddenDeletes.has(n.id));
       setNotes(list);
       // Nur die ungefilterte Gesamtliste cachen — Teilmenge würden beim nächsten Boot
       // fälschlich als "alle Notizen" erscheinen.
@@ -127,7 +131,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       // Offline: Cache zeigen statt harter Fehler
       const cached = await readCachedNotes<Note[]>();
       if (cached && cached.length > 0) {
-        setNotes(cached);
+        setNotes(hiddenDeletes.size > 0 ? cached.filter((n) => !hiddenDeletes.has(n.id)) : cached);
       } else {
         setError(e?.message ?? String(e));
       }
@@ -140,9 +144,12 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   // Boot: sofort Cache zeigen, dann live aktualisieren
   useEffect(() => {
     if (folderId == null) {
-      readCachedNotes<Note[]>().then((cached) => {
-        if (cached && cached.length > 0) setNotes(cached);
-      });
+      (async () => {
+        const cached = await readCachedNotes<Note[]>();
+        if (!cached || cached.length === 0) return;
+        const hidden = new Set(await pendingDeleteIds().catch(() => [] as number[]));
+        setNotes(hidden.size > 0 ? cached.filter((n) => !hidden.has(n.id)) : cached);
+      })();
     }
   }, [folderId]);
 
@@ -155,8 +162,10 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   useEffect(() => { load(); }, [load]);
 
   // Server-Volltextsuche ab 3 Zeichen (findet auch Inhalte, die nicht geladen sind);
-  // darunter lokales Filtern der geladenen Liste.
+  // darunter lokales Filtern der geladenen Liste. Veraltete Anfragen werden
+  // abgebrochen, sobald eine neuere Suche startet.
   const usedServerSearch = useRef(false);
+  const searchAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     const q = searchQuery.trim();
     if (q.length < 3) {
@@ -170,12 +179,15 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     if (folderId != null || tag || workspace != null) return;
     let cancelled = false;
     usedServerSearch.current = true;
+    searchAbort.current?.abort();
+    const ctrl = new AbortController();
+    searchAbort.current = ctrl;
     setLoading(true);
-    client.searchNotes(q, { limit: 50 })
+    client.searchNotes(q, { limit: 50, signal: ctrl.signal })
       .then((res) => { if (!cancelled) setNotes(res.notes ?? []); })
-      .catch(() => { if (!cancelled) load({ silent: true }); })
+      .catch(() => { if (!cancelled && !ctrl.signal.aborted) load({ silent: true }); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; ctrl.abort(); };
   }, [searchQuery, client, folderId, workspace, tag, load]);
 
   // Nach Änderungen (z.B. Speichern im Editor) still neu laden — außer eine

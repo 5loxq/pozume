@@ -283,6 +283,7 @@ export const es: Record<TranslationKey, string> = {
   'settings.crashClear': 'Vaciar',
   'editor.loadFailedTitle': 'No se pudo cargar la nota',
   'editor.loadFailedText': 'El contenido no está disponible sin conexión al servidor. Solo se puede editar después de cargarlo para no perder nada.',
+  'editor.deleteQueued': 'Eliminada sin conexión — la eliminación se sincronizará en la próxima conexión.',
   'editor.failed': 'Error al guardar',
   'editor.draftRestored': 'Borrador restaurado — cambios no guardados de la última sesión',
   'editor.conflictPending': 'El cambio sin conexión entra en conflicto con una versión del servidor más reciente',

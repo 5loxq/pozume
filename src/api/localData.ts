@@ -16,6 +16,7 @@ const DATA_KEYS = [
   'pozume.cache.folders.v1',
   'pozume.drawings.v1',
   'pozume.offlineQueue.v1',
+  'pozume.createdIds.v1',
   'pozume.reminders.v1',
   'pozume.drafts.v1',
   'pozume.list.prefs',

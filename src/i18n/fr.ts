@@ -283,6 +283,7 @@ export const fr: Record<TranslationKey, string> = {
   'settings.crashClear': 'Vider',
   'editor.loadFailedTitle': 'Impossible de charger la note',
   'editor.loadFailedText': 'Le contenu n’est pas disponible sans connexion au serveur. La modification n’est possible qu’après le chargement afin de ne rien perdre.',
+  'editor.deleteQueued': 'Supprimée hors ligne — la suppression sera synchronisée à la prochaine connexion.',
   'editor.failed': 'Échec de l’enregistrement',
   'editor.draftRestored': 'Brouillon restauré — modifications non enregistrées de la dernière session',
   'editor.conflictPending': 'La modification hors ligne entre en conflit avec une version serveur plus récente',

@@ -159,11 +159,14 @@ export class PoznoteClient {
     };
   }
 
-  private async req<T>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
+  private async req<T>(path: string, init: RequestInit = {}, attempt = 0, outerSignal?: AbortSignal): Promise<T> {
     // Timeout + ein Retry: Manche Server bewerben HTTP/3 (Alt-Svc), beantworten QUIC aber nicht —
     // erste Verbindungen hängen dann bis zum Systemtimeout. Der Retry läuft dann über TCP.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
+    // Äußerer Abbruch (z.B. veraltete Suchanfrage) leitet auf den internen Controller durch
+    const onOuterAbort = () => controller.abort();
+    outerSignal?.addEventListener('abort', onOuterAbort);
     let res: Response;
     try {
       res = await fetch(`${this.cfg.baseUrl}/api/v1${path}`, {
@@ -176,14 +179,16 @@ export class PoznoteClient {
         },
       });
     } catch (e) {
+      if (outerSignal?.aborted) throw new PoznoteError(0, 'aborted');
       if (attempt < 1) {
         clearTimeout(timer);
         await new Promise((r) => setTimeout(r, 400));
-        return this.req<T>(path, init, attempt + 1);
+        return this.req<T>(path, init, attempt + 1, outerSignal);
       }
       throw new PoznoteError(0, 'network');
     } finally {
       clearTimeout(timer);
+      outerSignal?.removeEventListener('abort', onOuterAbort);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -268,10 +273,12 @@ export class PoznoteClient {
     return this.req<{ notes: TemplateInfo[]; count?: number }>(`/notes/templates${qs}`);
   }
 
-  /** Serverseitige Volltextsuche (ignoriert Groß-/Kleinschreibung und Akzente) */
-  async searchNotes(q: string, opts: { limit?: number; mode?: 'all' | 'any' | 'phrase'; workspace?: string; tags?: string } = {}) {
-    const qs = new URLSearchParams({ q, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])) });
-    const res = await this.req<{ results?: any[]; notes?: any[] }>(`/notes/search?${qs.toString()}`);
+  /** Serverseitige Volltextsuche (ignoriert Groß-/Kleinschreibung und Akzente).
+   *  `signal` bricht veraltete Anfragen ab, sobald eine neuere Suche startet. */
+  async searchNotes(q: string, opts: { limit?: number; mode?: 'all' | 'any' | 'phrase'; workspace?: string; tags?: string; signal?: AbortSignal } = {}) {
+    const { signal, ...params } = opts;
+    const qs = new URLSearchParams({ q, ...Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])) });
+    const res = await this.req<{ results?: any[]; notes?: any[] }>(`/notes/search?${qs.toString()}`, {}, 0, signal);
     // Server antwortet mit `results` (inkl. excerpt); `notes` als Fallback für ältere Versionen
     const list: any[] = res.results ?? res.notes ?? [];
     return { notes: list.map((n) => normalizeNote({ ...n, content: n.content ?? n.excerpt })) };

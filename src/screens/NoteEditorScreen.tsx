@@ -10,7 +10,7 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { setReminder, removeReminder } from '../api/reminders';
-import { enqueueWrite, removeWrite } from '../api/offlineQueue';
+import { enqueueWrite, removeWrite, takeCreatedId } from '../api/offlineQueue';
 import { saveDraft, readDraft, clearDraft, type Draft } from '../api/drafts';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
@@ -90,6 +90,17 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
     const queueKey = noteIdRef.current != null ? `note-${noteIdRef.current}` : localQueueKey;
     try {
+      if (noteIdRef.current == null) {
+        // Hat der Queue-Flush diese Notiz bereits auf dem Server angelegt
+        // (Editor war während des Flushs offen), die ID übernehmen — sonst
+        // würde der Autosave dieselbe Notiz ein zweites Mal anlegen
+        const created = await takeCreatedId(localQueueKey).catch(() => null);
+        if (created != null) {
+          noteIdRef.current = created.id;
+          setNoteId(created.id);
+          versionRef.current = created.version;
+        }
+      }
       if (noteIdRef.current == null) {
         const res = await client.createNote({
           heading: body.heading || 'Ohne Titel',
@@ -269,6 +280,19 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             await client.deleteNote(noteId);
             onDeleted(noteId);
           } catch (e: any) {
+            if (e?.status === 0) {
+              // Offline: Löschung einreihen und lokal ausblenden — der Server
+              // übernimmt sie bei der nächsten Verbindung
+              enqueueWrite({
+                key: `delete-${noteId}`,
+                kind: 'delete',
+                noteId,
+                body: { heading: '', content: '', tags: '' },
+              }).catch(() => {});
+              onDeleted(noteId);
+              Alert.alert('🪶', t('editor.deleteQueued'));
+              return;
+            }
             Alert.alert(t('common.error'), e?.message ?? String(e));
           }
         },
@@ -358,8 +382,11 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         // Entwurf aus der letzten Sitzung wiederherstellen: Änderungen, die nie
         // synchronisiert wurden (App-Abbruch vor Autosave oder während des Requests).
         // Erfolgreich synchronisierte Entwürfe wurden beim Speichern gelöscht.
+        // Bei schreibgeschützten Formaten keinen Entwurf einspielen — der
+        // Autosave würde sonst Fremdformate beschädigen.
+        const editableFormat = n.type == null || EDITABLE_TYPES.has(n.type) || isDrawingContent(c);
         const draft = await readDraft(`note-${note.id}`);
-        if (!cancelled && draft &&
+        if (!cancelled && draft && editableFormat &&
             (draft.heading !== (n.heading ?? '') || draft.content !== (n.content ?? '') || draft.tags !== (n.tags ?? ''))) {
           setHeading(draft.heading);
           setContent(draft.content);

@@ -20,13 +20,19 @@ import { saveDraft } from './drafts';
  * entscheidet im Editor. Duplikatschutz: Schlug ein Create vorher fehl,
  * wird vor dem erneuten Anlegen geprüft, ob der Server die Notiz bereits
  * hat (Antwort kann auf dem Rückweg verloren gegangen sein).
+ *
+ * Löschungen werden ebenfalls gequeued; Listen blenden die Notiz lokal
+ * aus, bis der Server die Löschung übernommen hat.
  */
 const KEY = 'pozume.offlineQueue.v1';
+/** queueKey -> { id, version }: vom Flush erstellte Notizen, damit ein noch
+ *  offener Editor die ID übernimmt statt dieselbe Notiz doppelt anzulegen */
+const CREATED_KEY = 'pozume.createdIds.v1';
 
 export interface QueuedWrite {
   /** Eindeutiger Schlüssel: `note-{id}` für bestehende, `new-{sessionId}` für neue Notizen */
   key: string;
-  kind: 'create' | 'update';
+  kind: 'create' | 'update' | 'delete';
   noteId?: number;
   body: { heading: string; content: string; tags: string };
   /** Version-Token der Server-Fassung, auf der die Änderung basiert */
@@ -34,6 +40,34 @@ export interface QueuedWrite {
   /** Fehlversuche (Netzwerk) — ab 1 wird vor Create-Wiederholung auf Duplikate geprüft */
   attempts?: number;
   queuedAt: number;
+}
+
+async function readCreated(): Promise<Record<string, { id: number; version?: string }>> {
+  try {
+    const raw = await AsyncStorage.getItem(CREATED_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+async function writeCreated(m: Record<string, { id: number; version?: string }>): Promise<void> {
+  try { await AsyncStorage.setItem(CREATED_KEY, JSON.stringify(m)); } catch {}
+}
+
+/** Vom Flush erstellte Notiz-ID festhalten (der Editor kann noch offen sein) */
+export async function recordCreatedId(queueKey: string, noteId: number, version?: string): Promise<void> {
+  const m = await readCreated();
+  m[queueKey] = { id: noteId, version };
+  await writeCreated(m);
+}
+
+/** Erstellte Notiz-ID abholen und Verbrauchen — verhindert Doppelanlage im Editor */
+export async function takeCreatedId(queueKey: string): Promise<{ id: number; version?: string } | null> {
+  const m = await readCreated();
+  const entry = m[queueKey];
+  if (!entry) return null;
+  delete m[queueKey];
+  await writeCreated(m);
+  return entry;
 }
 
 async function readAll(): Promise<QueuedWrite[]> {
@@ -47,13 +81,24 @@ async function writeAll(q: QueuedWrite[]): Promise<void> {
   try { await AsyncStorage.setItem(KEY, JSON.stringify(q)); } catch {}
 }
 
-/** Schreibvorgang einreihen — vorhandener Eintrag mit gleichem Schlüssel wird ersetzt */
+/** Schreibvorgang einreihen — vorhandener Eintrag mit gleichem Schlüssel wird ersetzt.
+ *  Eine Löschung entfernt gleichzeitig ausstehende Änderungen derselben Notiz. */
 export async function enqueueWrite(entry: Omit<QueuedWrite, 'queuedAt'>): Promise<void> {
   const q = await readAll();
   const full: QueuedWrite = { ...entry, queuedAt: Date.now() };
-  const idx = q.findIndex((e) => e.key === entry.key);
-  if (idx >= 0) q[idx] = full; else q.push(full);
-  await writeAll(q);
+  let list = q;
+  if (entry.kind === 'delete' && entry.noteId != null) {
+    list = q.filter((e) => e.noteId !== entry.noteId || e.kind === 'delete');
+  }
+  const idx = list.findIndex((e) => e.key === entry.key);
+  if (idx >= 0) list[idx] = full; else list.push(full);
+  await writeAll(list);
+}
+
+/** IDs der offline gelöschten Notizen — Listen blenden sie aus, bis der Server es übernommen hat */
+export async function pendingDeleteIds(): Promise<number[]> {
+  const q = await readAll();
+  return q.filter((e) => e.kind === 'delete' && e.noteId != null).map((e) => e.noteId!);
 }
 
 /** Eintrag entfernen (nach erfolgreichem Online-Speichern) */
@@ -125,6 +170,7 @@ export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
           const existing = await findExistingCreate(client, entry);
           if (existing != null) {
             createdIds.push(existing);
+            await recordCreatedId(entry.key, existing);
             flushed++;
             processed.add(pair);
             continue;
@@ -137,7 +183,12 @@ export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
           tags: entry.body.tags,
         });
         createdIds.push(res.note.id);
-      } else if (entry.noteId != null) {
+        // ID festhalten: Ein noch offener Editor übernimmt sie, statt die
+        // Notiz beim nächsten Autosave ein zweites Mal anzulegen
+        await recordCreatedId(entry.key, res.note.id, res.note.version);
+      } else if (entry.kind === 'delete' && entry.noteId != null) {
+        await client.deleteNote(entry.noteId);
+      } else if (entry.kind === 'update' && entry.noteId != null) {
         await client.updateNote(entry.noteId, {
           ...entry.body,
           ...(entry.if_version ? { if_version: entry.if_version } : {}),
@@ -146,12 +197,29 @@ export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
       flushed++;
       processed.add(pair);
     } catch (e: any) {
-      if (e?.status === 409 && e?.data?.code === 'version_conflict' && entry.noteId != null) {
+      const status = e?.status ?? 0;
+      if (status === 409 && e?.data?.code === 'version_conflict' && entry.noteId != null) {
         // Konflikt: lokale Fassung als Entwurf erhalten, Server-Fassung bleibt
         // unangetastet — der Nutzer entscheidet beim nächsten Öffnen der Notiz.
         await saveDraft(`conflict-${entry.noteId}`, entry.body).catch(() => {});
         conflicts.push(entry.noteId);
         flushed++;
+        processed.add(pair);
+        continue;
+      }
+      if (status === 404 && entry.noteId != null) {
+        // Notiz wurde zwischenzeitlich woanders gelöscht — Eintrag erledigen,
+        // sonst blockiert er die Queue bei jedem Flush erneut
+        flushed++;
+        processed.add(pair);
+        continue;
+      }
+      if (status >= 400 && status < 500) {
+        // Dauerhafter Fehler (z.B. serverseitig gesperrt, Validierung): Inhalt
+        // als Entwurf erhalten und Eintrag entnehmen — eine Wiederholung würde
+        // nie erfolgreich sein und alle folgenden Einträge blockieren
+        const draftKey = entry.noteId != null ? `note-${entry.noteId}` : entry.key;
+        await saveDraft(draftKey, entry.body).catch(() => {});
         processed.add(pair);
         continue;
       }

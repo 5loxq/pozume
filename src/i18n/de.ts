@@ -280,6 +280,7 @@ export const de = {
   'settings.crashLog': 'Absturzprotokoll',
   'settings.crashEmpty': 'Keine Fehler aufgezeichnet.',
   'settings.crashClear': 'Leeren',
+  'editor.deleteQueued': 'Offline gelöscht — die Löschung wird bei der nächsten Verbindung synchronisiert.',
   'editor.failed': 'Fehlgeschlagen',
   'editor.loadFailedTitle': 'Notiz konnte nicht geladen werden',
   'editor.loadFailedText': 'Der Inhalt ist ohne Serververbindung nicht verfügbar. Bearbeiten ist erst nach dem Laden möglich, damit keine Inhalte verloren gehen.',
