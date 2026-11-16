@@ -5,6 +5,12 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-16 — iOS: Versions-Sync 0.6.0 (Build 4) fuer App, Share-Extension und Widget
+
+*Commit `7d643a9`*
+
+Behebung des Build-Fehlers "CFBundleVersion of an app extension must match parent app": Der Versionshub auf 0.6.0/Build 4 hatte nur app.json/package.json erreicht, die nativen Dateien waren driftend (App 0.2.0/2, Extensions 0.5.0/3, pbxproj 1.0/1 bzw. 0.5.0/3). Alle drei Info.plists lesen CFBundleShortVersionString/CFBundleVersion jetzt aus MARKETING_VERSION/CURRENT_PROJECT_VERSION, die in allen sechs Build-Konfigurationen auf 0.6.0/4 stehen — kuenftige Hubs koennen kein Ziel mehr ueberspringen. Mit dabei: die Xcode-Modernisierungen des Projekts (objectVersion 54, Development Team, LD_RUNPATH-Formatierung) und der aktualisierte Podfile.lock aus der offenen Xcode-Sitzung.
+
 ## 2026-11-16 — Changelog: Neue Vorgaenge dokumentiert
 
 *Commit `7be3214`*
