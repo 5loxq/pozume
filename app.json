@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pozume",
     "slug": "pozume",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "orientation": "portrait",
     "scheme": "pozume",
     "userInterfaceStyle": "automatic",
@@ -12,7 +12,7 @@
       "infoPlist": {
         "NSFaceIDUsageDescription": "Pozume schützt deine Notizen mit Face ID."
       },
-      "buildNumber": "3"
+      "buildNumber": "4"
     },
     "android": {
       "package": "de.inthielligent.pozume"
