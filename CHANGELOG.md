@@ -2,6 +2,14 @@
 
 Kommentierung aller Vorgänge der Pozume-Entwicklung (neueste zuerst).
 Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
+Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
+nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
+
+## 2026-11-16 — Changelog: Neue Vorgaenge dokumentiert
+
+*Commit `7be3214`*
+
+Changelog um die neuen Vorgaenge ergaenzt (44 Eintraege).
 
 ## 2026-11-16 — P0/P1/P2-Abarbeitung: Verschluesselung, Redirect-Schutz, Ordnerhierarchie, Kamera, Share-Flow, Pagination, Notizlinks
 
