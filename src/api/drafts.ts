@@ -1,9 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureSetItem, secureGetItem } from './secureStorage';
 
 /**
  * Dauerhafte lokale Entwürfe: Änderungen werden unabhängig vom Server-Speichern
  * laufend gesichert. Überlebt App-Absturz, App-Kill und Verbindungsabbruch —
  * der Autosave allein schützt nur, wenn sein Request auch durchkommt.
+ * Ablage verschlüsselt (P0-5), da Entwürfe vollständige Notizinhalte halten.
  *
  * Schlüssel: `note-{id}` für bestehende Notizen, `new-{sessionId}` für neue,
  * `conflict-{id}` für Offline-Fassungen, die auf dem Server kollidiert sind
@@ -20,13 +21,13 @@ export interface Draft {
 
 async function readAll(): Promise<Record<string, Draft>> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await secureGetItem(KEY);
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 }
 
 async function writeAll(m: Record<string, Draft>): Promise<void> {
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(m)); } catch {}
+  try { await secureSetItem(KEY, JSON.stringify(m)); } catch {}
 }
 
 export async function saveDraft(key: string, draft: Omit<Draft, 'savedAt'>): Promise<void> {

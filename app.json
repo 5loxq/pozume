@@ -10,7 +10,8 @@
       "bundleIdentifier": "de.inthielligent.pozume",
       "supportsTablet": true,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Pozume schützt deine Notizen mit Face ID."
+        "NSFaceIDUsageDescription": "Pozume schützt deine Notizen mit Face ID.",
+        "NSCameraUsageDescription": "Pozume kann Fotos aufnehmen und als Anhang an Notizen anfügen."
       },
       "buildNumber": "4"
     },

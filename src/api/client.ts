@@ -159,6 +159,24 @@ export class PoznoteClient {
     };
   }
 
+  /**
+   * Redirect-Schutz (P0-4): React-Native-fetch folgt Weiterleitungen automatisch
+   * und sendet die Authorization-Header mit. Würde eine Weiterleitung den
+   * konfigurierten Server verlassen, landen die Zugangsdaten bei einem fremden
+   * Host — das wird hier erkannt und abgewiesen (nach dem ersten Request).
+   */
+  private assertSameOrigin(res: Response): void {
+    const finalUrl = (res as any).url;
+    if (typeof finalUrl !== 'string' || !finalUrl) return; // URL nicht verfügbar → prüfen nicht möglich
+    let finalOrigin: string | null = null;
+    try { finalOrigin = new URL(finalUrl).origin; } catch { return; }
+    let cfgOrigin: string;
+    try { cfgOrigin = new URL(this.cfg.baseUrl).origin; } catch { return; }
+    if (finalOrigin !== cfgOrigin) {
+      throw new PoznoteError(0, `redirect-offsite: ${finalUrl}`);
+    }
+  }
+
   private async req<T>(path: string, init: RequestInit = {}, attempt = 0, outerSignal?: AbortSignal): Promise<T> {
     // Timeout + ein Retry: Manche Server bewerben HTTP/3 (Alt-Svc), beantworten QUIC aber nicht —
     // erste Verbindungen hängen dann bis zum Systemtimeout. Der Retry läuft dann über TCP.
@@ -201,16 +219,18 @@ export class PoznoteClient {
       }
       throw new PoznoteError(res.status, `HTTP ${res.status}: ${detail}`, data);
     }
+    this.assertSameOrigin(res);
     return res.json() as Promise<T>;
   }
 
   // --- Notes ---
-  async listNotes(params: { folder_id?: number; tags?: string; search?: string; workspace?: string; favorite?: boolean } = {}) {
+  /** Notizen seitenweise laden (limit/offset); `total` = Gesamtzahl laut Server */
+  async listNotes(params: { folder_id?: number; tags?: string; search?: string; workspace?: string; favorite?: boolean; limit?: number; offset?: number } = {}) {
     const qs = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)]),
     ).toString();
-    const res = await this.req<{ notes: Note[] }>(`/notes${qs ? `?${qs}` : ''}`);
-    return { notes: (res.notes ?? []).map(normalizeNote) };
+    const res = await this.req<{ notes: Note[]; total?: number }>(`/notes${qs ? `?${qs}` : ''}`);
+    return { notes: (res.notes ?? []).map(normalizeNote), total: res.total };
   }
 
   async getNote(id: number) {
@@ -454,6 +474,16 @@ export class PoznoteClient {
     return this.req<{ success: boolean }>(`/folders/${id}`, { method: 'DELETE' });
   }
 
+  /** Ordner umbenennen (PATCH /folders/{id}) */
+  renameFolder(id: number, name: string) {
+    return this.req<{ success: boolean; folder?: { id: number; name: string } }>(`/folders/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+  }
+
+  /** Ordner in einen anderen Ordner verschieben (parent_id null = oberste Ebene) */
+  moveFolder(id: number, parentId: number | null) {
+    return this.req<{ success: boolean; folder?: { id: number; path: string } }>(`/folders/${id}/move`, { method: 'POST', body: JSON.stringify({ parent_id: parentId }) });
+  }
+
   /** Ordner-Icon setzen (Lucide-Klassenname, leerer String = Standard) */
   setFolderIcon(id: number, icon: string, iconColor?: string) {
     return this.req<{ success: boolean }>(`/folders/${id}/icon`, {
@@ -474,6 +504,7 @@ export class PoznoteClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    this.assertSameOrigin(res);
     return res.text();
   }
 
@@ -484,6 +515,7 @@ export class PoznoteClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    this.assertSameOrigin(res);
     return new Uint8Array(await res.arrayBuffer());
   }
 
@@ -527,6 +559,7 @@ export class PoznoteClient {
       const text = await res.text().catch(() => '');
       throw new PoznoteError(res.status, `HTTP ${res.status}: ${text.slice(0, 200)}`);
     }
+    this.assertSameOrigin(res);
     return res.json();
   }
 
@@ -540,6 +573,7 @@ export class PoznoteClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    this.assertSameOrigin(res);
     return res.text();
   }
 
@@ -549,6 +583,7 @@ export class PoznoteClient {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
+    this.assertSameOrigin(res);
     return new Uint8Array(await res.arrayBuffer());
   }
 }

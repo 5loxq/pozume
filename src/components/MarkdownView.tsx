@@ -36,8 +36,13 @@ function tokenizeLine(line: string): Token[] {
   return out;
 }
 
-/** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes, Code-Blöcke */
-export default function MarkdownView({ content }: { content: string }) {
+/** Leichter Markdown-Renderer: Überschriften, Listen, Fettdruck, Code, Quotes, Code-Blöcke.
+ *  Interne Notizlinks ([[Notiztitel]] und pozume://note/ID) werden tappbar. */
+export default function MarkdownView({
+  content,
+  onOpenNoteId,
+  onOpenNoteTitle,
+}: { content: string; onOpenNoteId?: (id: number) => void; onOpenNoteTitle?: (title: string) => void }) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
@@ -45,14 +50,40 @@ export default function MarkdownView({ content }: { content: string }) {
   const out: React.ReactNode[] = [];
 
   const renderInline = (text: string, keyBase: string, style: object = {}) => {
-    // **fett** und `code` in Segmente zerlegen
-    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+    // **fett**, `code`, [[Notizlink]] und pozume://note/ID in Segmente zerlegen
+    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[\[[^\]\n]+\]\]|pozume:\/\/note\/\d+)/g).filter(Boolean);
     return parts.map((part, i) => {
       if (part.startsWith('**') && part.endsWith('**')) {
         return <Text key={`${keyBase}-${i}`} style={[style, styles.bold]}>{part.slice(2, -2)}</Text>;
       }
       if (part.startsWith('`') && part.endsWith('`')) {
         return <Text key={`${keyBase}-${i}`} style={[style, styles.code]}>{part.slice(1, -1)}</Text>;
+      }
+      // Wiki-Link [[Notiztitel]] — öffnet die verlinkte Notiz
+      if (part.startsWith('[[') && part.endsWith(']]')) {
+        const title = part.slice(2, -2);
+        return (
+          <Text
+            key={`${keyBase}-${i}`}
+            style={[style, styles.noteLink]}
+            onPress={onOpenNoteTitle ? () => onOpenNoteTitle(title) : undefined}
+          >
+            {title}
+          </Text>
+        );
+      }
+      // Deep-Link pozume://note/123
+      const deep = part.match(/^pozume:\/\/note\/(\d+)$/);
+      if (deep) {
+        return (
+          <Text
+            key={`${keyBase}-${i}`}
+            style={[style, styles.noteLink]}
+            onPress={onOpenNoteId ? () => onOpenNoteId(Number(deep[1])) : undefined}
+          >
+            🪶
+          </Text>
+        );
       }
       return <Text key={`${keyBase}-${i}`} style={style}>{part}</Text>;
     });
@@ -134,6 +165,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   para: { ...type.body, lineHeight: 26 },
   bold: { fontWeight: '700' },
   code: { fontFamily: 'Menlo', fontSize: 14, backgroundColor: colors.primarySoft, color: colors.primaryDark, borderRadius: 4 },
+  noteLink: { color: colors.primary, fontWeight: '600', textDecorationLine: 'underline' },
   li: { flexDirection: 'row', marginBottom: 4, paddingRight: spacing.md },
   bullet: { width: 22, color: colors.primary, fontWeight: '700', fontSize: 15 },
   liText: { ...type.body, flex: 1, lineHeight: 24 },

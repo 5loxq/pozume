@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureSetItem, secureGetItem } from './secureStorage';
 import type { PoznoteClient } from './client';
 import { saveDraft } from './drafts';
 
@@ -44,13 +44,13 @@ export interface QueuedWrite {
 
 async function readCreated(): Promise<Record<string, { id: number; version?: string }>> {
   try {
-    const raw = await AsyncStorage.getItem(CREATED_KEY);
+    const raw = await secureGetItem(CREATED_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 }
 
 async function writeCreated(m: Record<string, { id: number; version?: string }>): Promise<void> {
-  try { await AsyncStorage.setItem(CREATED_KEY, JSON.stringify(m)); } catch {}
+  try { await secureSetItem(CREATED_KEY, JSON.stringify(m)); } catch {}
 }
 
 /** Vom Flush erstellte Notiz-ID festhalten (der Editor kann noch offen sein) */
@@ -72,13 +72,13 @@ export async function takeCreatedId(queueKey: string): Promise<{ id: number; ver
 
 async function readAll(): Promise<QueuedWrite[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await secureGetItem(KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
 
 async function writeAll(q: QueuedWrite[]): Promise<void> {
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(q)); } catch {}
+  try { await secureSetItem(KEY, JSON.stringify(q)); } catch {}
 }
 
 /** Schreibvorgang einreihen — vorhandener Eintrag mit gleichem Schlüssel wird ersetzt.

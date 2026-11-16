@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureSetItem, secureGetItem } from './secureStorage';
 
 /**
  * Lokaler Cache für Zeichnungsinhalte: Die Notizliste liefert keinen `content`,
@@ -19,7 +19,7 @@ export type DrawingCache = Record<number, DrawingCacheEntry>;
 
 export async function readDrawingCache(): Promise<DrawingCache> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await secureGetItem(KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     // Schlüssel kommen als Strings aus JSON — zurück zu Zahlen normalisieren
     const out: DrawingCache = {};
@@ -29,5 +29,17 @@ export async function readDrawingCache(): Promise<DrawingCache> {
 }
 
 export async function writeDrawingCache(cache: DrawingCache): Promise<void> {
-  try { await AsyncStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
+  try {
+    // Cache-Begrenzung (P1-14): die 200 zuletzt geaenderten Zeichnungen behalten,
+    // aeltere verfaellen — der Cache darf nicht unbegrenzt wachsen
+    const entries = Object.entries(cache);
+    if (entries.length > 200) {
+      entries.sort((a, b) => (b[1].u ?? '').localeCompare(a[1].u ?? ''));
+      const capped: DrawingCache = {};
+      for (const [k, v] of entries.slice(0, 200)) capped[Number(k)] = v;
+      await secureSetItem(KEY, JSON.stringify(capped));
+      return;
+    }
+    await secureSetItem(KEY, JSON.stringify(cache));
+  } catch {}
 }

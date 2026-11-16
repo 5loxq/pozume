@@ -8,10 +8,12 @@ import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite, takeCreatedId } from '../api/offlineQueue';
 import { saveDraft, readDraft, clearDraft, type Draft } from '../api/drafts';
+import { getOfflineAttachment, downloadAttachmentOffline, removeOfflineAttachment } from '../api/attachmentStore';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
@@ -28,6 +30,10 @@ interface Props {
   client: PoznoteClient;
   note: Note | null;          // null = neue Notiz
   drawing?: boolean;          // true = neue Notiz startet als Zeichnung
+  /** Vorbelegung für neue Notizen (z.B. aus dem Teilen-Menü übernommen) */
+  prefill?: { heading: string; content: string } | null;
+  /** Alle Notizen (für Notizlinks und Link-Auswahl) */
+  allNotes?: Note[];
   onClose: () => void;
   onSaved: (note: Note) => void;
   onDeleted: (id: number) => void;
@@ -44,15 +50,17 @@ const NOTE_COLORS = ['#3b82f6', '#16a34a', '#dc2626', '#f59e0b', '#7c3aed', '#db
  *  wird schreibgeschützt geöffnet — ein ungeeigneter Editor würde die Formatierung beschädigen. */
 const EDITABLE_TYPES = new Set(['markdown', 'note', 'excalidraw']);
 
-export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
+export default function NoteEditorScreen({ client, note, drawing, prefill, allNotes, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
   const styles = useMemo(() => getStyles(colors, type), [colors]);
   const locale = getLocale();
   const isNew = note == null;
-  const [heading, setHeading] = useState(note?.heading ?? '');
-  const [content, setContent] = useState(isNew && drawing ? emptyDrawingHtml() : (note?.content ?? ''));
+  const [heading, setHeading] = useState(note?.heading ?? prefill?.heading ?? '');
+  const [content, setContent] = useState(
+    isNew && drawing ? emptyDrawingHtml() : (note?.content ?? prefill?.content ?? ''),
+  );
   const [tags, setTags] = useState(note?.tags ?? '');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'queued' | 'failed'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
@@ -84,6 +92,14 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const lockTried = useRef(false);
   const [foreignLock, setForeignLock] = useState<NoteLockInfo | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Fehlgeschlagener Upload (Datei liegt noch lokal) — Wiederholen anbieten
+  const [failedUpload, setFailedUpload] = useState<{ uri: string; name: string; mimeType?: string } | null>(null);
+  // Offline verfügbare Anhänge (attachmentId -> lokaler Pfad vorhanden)
+  const [offlineAtts, setOfflineAtts] = useState<Set<string>>(new Set());
+  // Vorhandene Tags des Servers für Vorschläge unter dem Tag-Feld
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
+  // Notizlink-Auswahl (P2-16: [[Notiztitel]] einfügen)
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
 
   const persist = async (opts: { ignoreVersion?: boolean } = {}) => {
     setSaveState('saving');
@@ -189,6 +205,34 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       setTags(draft.tags);
       scheduleSave();
     }
+  };
+
+  // --- Notizlinks (P2-16): [[Notiztitel]] einfuegen und in der Vorschau oeffnen ---
+  const insertNoteLink = (target: Note) => {
+    setShowLinkPicker(false);
+    const link = `[[${target.heading}]]`;
+    const next = latest.current.content ? `${latest.current.content}\n${link}` : link;
+    setContent(next);
+    scheduleSave();
+  };
+
+  const openNoteByTitle = (title: string) => {
+    if (!allNotes || !onOpenNote) return;
+    const target = allNotes.find((n) => (n.heading ?? '').toLowerCase() === title.toLowerCase());
+    if (target) onOpenNote(target);
+  };
+
+  const openNoteById = (id: number) => {
+    if (onOpenNote) onOpenNote({ id, heading: '' });
+  };
+
+  // --- Tag-Vorschlaege (P1-10): vorhandene Tags per Tipp uebernehmen ---
+  const addTagSuggestion = (tag: string) => {
+    const current = latest.current.tags.split(',').map((s) => s.trim()).filter(Boolean);
+    if (current.some((s) => s.toLowerCase() === tag.toLowerCase())) return;
+    const next = [...current, tag].join(', ');
+    setTags(next);
+    scheduleSave();
   };
 
   // Autosave 1.2s nach letzter Eingabe; Entwurf bereits nach 400ms lokal sichern —
@@ -443,7 +487,19 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       .then((r) => { setShared(!!(r.public ?? r.shared)); setSharedUrl(r.url ?? null); })
       .catch(() => {});
     client.listAttachments(note.id)
-      .then((r) => setAttachments(r.attachments ?? []))
+      .then(async (r) => {
+        setAttachments(r.attachments ?? []);
+        // Welche Anhänge haben eine lokale Offline-Kopie?
+        const local: string[] = [];
+        for (const a of r.attachments ?? []) {
+          if (await getOfflineAttachment(a.id).catch(() => null)) local.push(a.id);
+        }
+        setOfflineAtts(new Set(local));
+      })
+      .catch(() => {});
+    // Vorhandene Tags einmalig laden — Vorschläge unter dem Tag-Feld
+    client.listTags()
+      .then((r) => setTagSuggestions((r.tags ?? []).map((x) => x.tag).slice(0, 30)))
       .catch(() => {});
     // Backlinks + Server-Erinnerung laden
     client.getBacklinks(note.id)
@@ -457,10 +513,15 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const openAttachment = async (att: Attachment) => {
     if (noteId == null) return;
     try {
-      const bytes = await client.getAttachmentBytes(noteId, att.id);
+      // Offline-Kopie zuerst — funktioniert ohne Verbindung
+      const localPath = await getOfflineAttachment(att.id).catch(() => null);
       const fileName = att.original_filename || att.filename || 'anhang';
-      const path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
-      await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
+      let path = localPath;
+      if (!path) {
+        const bytes = await client.getAttachmentBytes(noteId, att.id);
+        path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
+        await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
+      }
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(path, { mimeType: att.file_type || 'application/octet-stream', dialogTitle: fileName });
       }
@@ -596,11 +657,25 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         ]);
         return;
       }
-      const res = await client.shareNote(noteId);
-      const url = res.url ?? res.share_url ?? (res.token ? `${client.cfg.baseUrl}/${res.token}` : null);
-      if (!url) throw new Error('no url');
-      setShared(true); setSharedUrl(url);
-      Share.share({ title: latest.current.heading || 'Pozume', message: url }).catch(() => {});
+      // Berechtigungen vor der Freigabe erklären (P2-17): Der Nutzer soll
+      // erkennen, was "öffentlich" bedeutet, bevor der Link entsteht.
+      Alert.alert(t('editor.shareExplainTitle'), t('editor.shareExplainText'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('editor.shareCreate'),
+          onPress: async () => {
+            try {
+              const res = await client.shareNote(noteId);
+              const url = res.url ?? res.share_url ?? (res.token ? `${client.cfg.baseUrl}/${res.token}` : null);
+              if (!url) throw new Error('no url');
+              setShared(true); setSharedUrl(url);
+              Share.share({ title: latest.current.heading || 'Pozume', message: url }).catch(() => {});
+            } catch (e: any) {
+              Alert.alert(t('common.error'), e?.message ?? String(e));
+            }
+          },
+        },
+      ]);
     } catch (e: any) {
       Alert.alert(t('common.error'), e?.message ?? String(e));
     }
@@ -706,39 +781,95 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     ]);
   };
 
-  // --- Anhang hochladen (Document-Picker -> multipart) ---
-  const pickAttachment = async () => {
+  // --- Anhang hinzufügen: Datei wählen oder Kamera (P1-8) ---
+  const uploadPicked = async (file: { uri: string; name: string; mimeType?: string }) => {
     if (noteId == null || uploading) return;
+    setUploading(true);
+    setFailedUpload(null);
     try {
-      const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
-      if (res.canceled || !res.assets?.length) return;
-      const asset = res.assets[0];
-      setUploading(true);
-      await client.uploadAttachment(noteId, {
-        uri: asset.uri,
-        name: asset.name ?? 'anhang',
-        mimeType: asset.mimeType ?? undefined,
-      });
+      await client.uploadAttachment(noteId, file);
       const atts = await client.listAttachments(noteId);
       setAttachments(atts.attachments ?? []);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('🪶', t('editor.uploaded'));
     } catch (e: any) {
-      Alert.alert(t('common.error'), e?.message ?? String(e));
+      // Fehlgeschlagenen Upload merken — die Datei liegt noch lokal und kann
+      // mit einem Tipp wiederholt werden (kein erneutes Suchen nötig)
+      setFailedUpload(file);
+      Alert.alert(t('editor.uploadFailed'), e?.message ?? String(e));
     } finally {
       setUploading(false);
     }
   };
 
+  const pickAttachment = () => {
+    if (noteId == null || uploading) return;
+    Alert.alert(t('editor.addAttachment'), '', [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: '📷 ' + t('editor.takePhoto'),
+        onPress: async () => {
+          try {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) {
+              Alert.alert(t('common.error'), t('reminder.localDenied'));
+              return;
+            }
+            const res = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images });
+            if (res.canceled || !res.assets?.length) return;
+            const asset = res.assets[0];
+            await uploadPicked({ uri: asset.uri, name: asset.fileName ?? 'foto.jpg', mimeType: asset.mimeType ?? 'image/jpeg' });
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+      {
+        text: '📄 ' + t('editor.attachFile'),
+        onPress: async () => {
+          try {
+            const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+            if (res.canceled || !res.assets?.length) return;
+            const asset = res.assets[0];
+            await uploadPicked({ uri: asset.uri, name: asset.name ?? 'anhang', mimeType: asset.mimeType ?? undefined });
+          } catch (e: any) {
+            Alert.alert(t('common.error'), e?.message ?? String(e));
+          }
+        },
+      },
+    ]);
+  };
+
+  // --- Offline-Verfügbarkeit eines Anhangs (P1-8) ---
+  const toggleAttachmentOffline = async (att: Attachment) => {
+    if (noteId == null) return;
+    try {
+      if (offlineAtts.has(att.id)) {
+        await removeOfflineAttachment(att.id);
+        setOfflineAtts((prev) => { const n = new Set(prev); n.delete(att.id); return n; });
+        Alert.alert('🪶', t('editor.attachOfflineRemove'));
+      } else {
+        await downloadAttachmentOffline(client, noteId, att);
+        setOfflineAtts((prev) => new Set(prev).add(att.id));
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('🪶', t('editor.attachOfflineDone'));
+      }
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
   const confirmDeleteAttachment = (att: Attachment) => {
     if (noteId == null) return;
-    Alert.alert(t('editor.attachDelete'), att.original_filename || att.filename, [
+    Alert.alert(att.original_filename || att.filename, '', [
       { text: t('common.cancel'), style: 'cancel' },
+      { text: offlineAtts.has(att.id) ? t('editor.attachOfflineRemove') : t('editor.attachOffline'), onPress: () => toggleAttachmentOffline(att) },
       {
         text: t('common.delete'), style: 'destructive',
         onPress: async () => {
           try {
             await client.deleteAttachment(noteId, att.id);
+            await removeOfflineAttachment(att.id).catch(() => {});
             setAttachments((prev) => prev.filter((a) => a.id !== att.id));
           } catch (e: any) {
             Alert.alert(t('common.error'), e?.message ?? String(e));
@@ -977,6 +1108,12 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
               <Text style={styles.actionChipText}>{t('editor.versions')}</Text>
             </TouchableOpacity>
           ) : null}
+          {!isExcalidraw && !formatReadOnly ? (
+            <TouchableOpacity style={styles.actionChip} onPress={() => setShowLinkPicker(true)}>
+              <Text style={styles.actionChipIcon}>🔗</Text>
+              <Text style={styles.actionChipText}>{t('editor.insertLink')}</Text>
+            </TouchableOpacity>
+          ) : null}
           {!isExcalidraw ? (
             <TouchableOpacity style={styles.actionChip} onPress={convertType}>
               <Text style={styles.actionChipIcon}>⇄</Text>
@@ -1056,6 +1193,25 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </Text>
         </View>
       )}
+      {failedUpload && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.dangerSoft, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+          <Text style={{ color: colors.danger, fontSize: 13, flexShrink: 1 }}>
+            ⚠️ {t('editor.uploadFailed')}: {failedUpload.name}
+          </Text>
+          <TouchableOpacity
+            onPress={() => uploadPicked(failedUpload)}
+            style={{ backgroundColor: colors.danger, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 5, marginLeft: spacing.sm }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>{t('common.retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {isNew && prefill && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            🪶 {t('share.pendingTitle')} — {t('share.pendingHint')}
+          </Text>
+        </View>
+      )}
       {foreignLock && (
         <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
           <Text style={{ color: colors.primary, fontSize: 13 }}>
@@ -1129,7 +1285,11 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           />
         ) : preview ? (
           <View style={styles.previewWrap}>
-            <MarkdownView content={content} />
+            <MarkdownView
+              content={content}
+              onOpenNoteId={openNoteById}
+              onOpenNoteTitle={openNoteByTitle}
+            />
           </View>
         ) : (
           <TextInput
@@ -1152,6 +1312,18 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           onChangeText={(v) => { setTags(v); scheduleSave(); }}
           autoCapitalize="none"
         />
+        {tagSuggestions.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagSuggestRow}>
+            {tagSuggestions
+              .filter((sug) => !tags.split(',').map((s) => s.trim().toLowerCase()).includes(sug.toLowerCase()))
+              .slice(0, 12)
+              .map((sug) => (
+                <TouchableOpacity key={sug} style={styles.tagSuggestChip} onPress={() => addTagSuggestion(sug)}>
+                  <Text style={styles.tagSuggestText}>#{sug}</Text>
+                </TouchableOpacity>
+              ))}
+          </ScrollView>
+        )}
         {!isExcalidraw && (
           <Text style={styles.meta}>
             {content.trim()
@@ -1165,7 +1337,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             <View style={styles.attachRow}>
               {attachments.map((att) => (
                 <TouchableOpacity key={att.id} style={styles.attachChip} onPress={() => openAttachment(att)} onLongPress={() => confirmDeleteAttachment(att)} activeOpacity={0.7}>
-                  <Text style={styles.attachName} numberOfLines={1}>{att.original_filename || att.filename}</Text>
+                  <Text style={styles.attachName} numberOfLines={1}>{offlineAtts.has(att.id) ? '💾 ' : '📎 '}{att.original_filename || att.filename}</Text>
                   {att.file_size != null ? (
                     <Text style={styles.attachSize}>{att.file_size >= 1048576 ? `${(att.file_size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(att.file_size / 1024))} KB`}</Text>
                   ) : null}
@@ -1249,6 +1421,34 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </View>
         </View>
       </Modal>
+      <Modal visible={showLinkPicker} transparent animationType="slide" onRequestClose={() => setShowLinkPicker(false)}>
+        <View style={styles.backdrop}>
+          <TouchableOpacity style={styles.backdropTouch} activeOpacity={1} onPress={() => setShowLinkPicker(false)} />
+          <View style={[styles.sheet, shadow]}>
+            <Text style={styles.sheetTitle}>🔗 {t('editor.linkPickerTitle')}</Text>
+            {allNotes && allNotes.length > 0 ? (
+              <FlatList
+                data={allNotes.filter((n) => n.id !== noteId).slice(0, 100)}
+                keyExtractor={(x) => String(x.id)}
+                style={styles.tplList}
+                renderItem={({ item }) => (
+                  <TouchableOpacity style={styles.tplRow} onPress={() => insertNoteLink(item)}>
+                    <Text style={styles.tplIcon}>📄</Text>
+                    <View style={styles.tplTextWrap}>
+                      <Text style={styles.tplName} numberOfLines={1}>{item.heading}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            ) : (
+              <Text style={styles.tplEmpty}>{t('editor.linkEmpty')}</Text>
+            )}
+            <TouchableOpacity style={styles.tplClose} onPress={() => setShowLinkPicker(false)}>
+              <Text style={styles.tplCloseText}>{t('common.close')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1304,6 +1504,13 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.primarySoft, borderRadius: radius.pill,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
+  tagSuggestRow: { flexDirection: 'row', flexGrow: 0, marginTop: spacing.sm },
+  tagSuggestChip: {
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 4,
+    marginRight: spacing.sm,
+  },
+  tagSuggestText: { fontSize: 12, fontWeight: '600', color: colors.textMuted },
   attachSection: { marginTop: spacing.lg },
   attachTitle: { ...type.h2, fontSize: 14, marginBottom: spacing.sm },
   attachRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

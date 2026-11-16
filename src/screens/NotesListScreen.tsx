@@ -49,6 +49,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
+  // Seitenweises Laden (P1-14): erste Seite beim Start, weitere beim Scrollen
+  const PAGE_SIZE = 100;
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const offsetRef = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -114,7 +119,13 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     // Offline gelöschte Notizen ausblenden, bis der Server die Löschung übernommen hat
     const hiddenDeletes = new Set(await pendingDeleteIds().catch(() => [] as number[]));
     try {
-      const res = await client.listNotes({ ...(folderId != null ? { folder_id: folderId } : {}), ...(workspace ? { workspace } : {}), ...(tag ? { tags: tag } : {}) });
+      const res = await client.listNotes({
+        ...(folderId != null ? { folder_id: folderId } : {}),
+        ...(workspace ? { workspace } : {}),
+        ...(tag ? { tags: tag } : {}),
+        limit: PAGE_SIZE, offset: 0,
+      });
+      const rawCount = (res.notes ?? []).length;
       let list = res.notes ?? [];
       // Der Server ignoriert den tags-Parameter je nach Version — deshalb zusätzlich lokal filtern
       if (tag) {
@@ -124,6 +135,8 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       }
       if (hiddenDeletes.size > 0) list = list.filter((n) => !hiddenDeletes.has(n.id));
       setNotes(list);
+      offsetRef.current = rawCount;
+      setHasMore(res.total != null ? rawCount < res.total : rawCount >= PAGE_SIZE);
       // Nur die ungefilterte Gesamtliste cachen — Teilmenge würden beim nächsten Boot
       // fälschlich als "alle Notizen" erscheinen.
       if (folderId == null && !tag && !workspace) cacheNotes(list).catch(() => {});
@@ -140,6 +153,36 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       setRefreshing(false);
     }
   }, [client, folderId, workspace, tag]);
+
+  /** Naechste Seite nachladen (beim Scrollen ans Listenende) */
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const res = await client.listNotes({
+        ...(folderId != null ? { folder_id: folderId } : {}),
+        ...(workspace ? { workspace } : {}),
+        ...(tag ? { tags: tag } : {}),
+        limit: PAGE_SIZE, offset: offsetRef.current,
+      });
+      const rawCount = (res.notes ?? []).length;
+      let page = res.notes ?? [];
+      if (tag) {
+        const wanted = tag.toLowerCase();
+        page = page.filter((n) =>
+          (n.tags ?? '').split(',').map((s) => s.trim().toLowerCase()).includes(wanted));
+      }
+      const hidden = new Set(await pendingDeleteIds().catch(() => [] as number[]));
+      if (hidden.size > 0) page = page.filter((n) => !hidden.has(n.id));
+      setNotes((prev) => [...prev, ...page]);
+      offsetRef.current += rawCount;
+      setHasMore(res.total != null ? offsetRef.current < res.total : rawCount >= PAGE_SIZE);
+    } catch {
+      // Offline: einfach beim naechsten Versuch weitermachen
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [client, folderId, workspace, tag, loadingMore, hasMore, loading]);
 
   // Boot: sofort Cache zeigen, dann live aktualisieren
   useEffect(() => {
@@ -463,6 +506,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         )}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderBody}
+        ListFooterComponent={loadingMore ? (
+          <Text style={styles.loadingMore}>{t('list.loadingMore')}</Text>
+        ) : null}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
         contentContainerStyle={styles.listContent}
         windowSize={11}
         maxToRenderPerBatch={10}
@@ -570,6 +618,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   emptyEmoji: { fontSize: 44, marginBottom: spacing.md },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.text },
   emptyText: { ...type.muted, marginTop: spacing.xs, textAlign: 'center' },
+  loadingMore: { ...type.faint(), textAlign: 'center', paddingVertical: spacing.md },
   selectBar: {
     position: 'absolute', left: spacing.lg, right: spacing.lg, bottom: spacing.xl,
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,

@@ -9,8 +9,23 @@ import { usePalette, spacing, radius, typeFor, shadow,
 import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { readCachedFolders, cacheFolders } from '../api/cache';
+import FolderPickerSheet from '../components/FolderPickerSheet';
+import PromptModal from '../components/PromptModal';
 
-interface Folder { id: number; name: string; notes_count?: number; workspace?: string; color_hex?: string | null; icon?: string | null }
+/** Hierarchischer Ordner des Servers (GET /folders?hierarchical=true) */
+interface Folder {
+  id: number;
+  name: string;
+  parent_id?: number | null;
+  path?: string;
+  notes_count?: number;
+  workspace?: string | null;
+  color_hex?: string | null;
+  icon?: string | null;
+  children?: Folder[];
+  /** Tiefe im Baum (0 = oberste Ebene) — beim Umbrechen gesetzt */
+  depth?: number;
+}
 
 /** Lucide-Icon-Klassen des Servers -> Emoji für die App-Anzeige */
 const FOLDER_ICONS: Array<[string, string]> = [
@@ -28,6 +43,25 @@ interface Props {
   onBack: () => void;
 }
 
+/** Baum in flache Liste umbrechen (depth-first); Unterordner eingerückt */
+function flattenTree(nodes: Folder[], depth = 0, out: Folder[] = []): Folder[] {
+  for (const n of nodes ?? []) {
+    out.push({ ...n, depth });
+    if (n.children?.length) flattenTree(n.children, depth + 1, out);
+  }
+  return out;
+}
+
+/** Alle IDs eines Teilbaums (der Ordner selbst + alle Unterordner) */
+function collectIds(folder: Folder): number[] {
+  const out = [folder.id];
+  const walk = (nodes?: Folder[]) => {
+    for (const n of nodes ?? []) { out.push(n.id); walk(n.children); }
+  };
+  walk(folder.children);
+  return out;
+}
+
 export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
@@ -39,18 +73,22 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
   const [newName, setNewName] = useState('');
   const [firstWorkspace, setFirstWorkspace] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // Umbenennen (Prompt) und Verschieben (Picker)
+  const [renameFolder, setRenameFolder] = useState<Folder | null>(null);
+  const [moveFolder, setMoveFolder] = useState<Folder | null>(null);
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
     try {
-      // Ordner je Workspace laden und zusammenführen — GET /folders liefert sonst nur den ersten
+      // Ordner je Workspace hierarchisch laden und zusammenführen — GET /folders
+      // liefert sonst nur den ersten Workspace und keine Unterordner
       const wsRes = await client.listWorkspaces().catch(() => null);
       const workspaces = (wsRes?.workspaces ?? []).map((w) => w.name);
       if (workspaces.length > 0) setFirstWorkspace(workspaces[0]);
       const lists = await Promise.all(
         (workspaces.length > 0 ? workspaces : [undefined]).map((ws) =>
-          client.listFolders(ws)
-            .then((res) => ((res.folders ?? []) as Folder[]).map((f) => ({ ...f, workspace: ws })))
+          client.listFolders(ws, true)
+            .then((res) => flattenTree((res.folders ?? []) as Folder[]).map((f) => ({ ...f, workspace: ws })))
             .catch(() => [] as Folder[]),
         ),
       );
@@ -115,8 +153,34 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
     ]);
   };
 
+  const doRename = async (newNameValue: string) => {
+    const folder = renameFolder;
+    setRenameFolder(null);
+    if (!folder || !newNameValue.trim() || newNameValue.trim() === folder.name) return;
+    try {
+      await client.renameFolder(folder.id, newNameValue.trim());
+      load({ silent: true });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
+  const doMove = async (targetId: number | null) => {
+    const folder = moveFolder;
+    setMoveFolder(null);
+    if (!folder || targetId === folder.id) return;
+    try {
+      await client.moveFolder(folder.id, targetId);
+      load({ silent: true });
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
+  };
+
   const folderMenu = (folder: Folder) => {
-    Alert.alert(folder.name, '', [
+    Alert.alert(folder.path || folder.name, '', [
+      { text: t('folders.rename'), onPress: () => setRenameFolder(folder) },
+      { text: t('folders.move'), onPress: () => setMoveFolder(folder) },
       { text: t('folders.openKanban'), onPress: () => onOpenKanban(folder) },
       { text: t('folders.setIcon'), onPress: () => pickIcon(folder) },
       { text: t('common.delete'), style: 'destructive', onPress: () => confirmDeleteFolder(folder) },
@@ -153,8 +217,10 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
     <TouchableOpacity style={[styles.row, shadow]} activeOpacity={0.7} onPress={() => onOpenFolder(item)} onLongPress={() => folderMenu(item)}>
       <Text style={[styles.icon, item.color_hex ? { color: item.color_hex } : null]}>{iconToEmoji(item.icon)}</Text>
       <View style={styles.nameWrap}>
-        <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-        {item.workspace ? <Text style={styles.wsLabel} numberOfLines={1}>{item.workspace}</Text> : null}
+        <Text style={styles.name} numberOfLines={1}>
+          {(item.depth ?? 0) > 0 ? `${'— '.repeat(item.depth ?? 0)}${item.name}` : item.name}
+        </Text>
+        {item.workspace ? <Text style={styles.wsLabel} numberOfLines={1}>{item.workspace}{item.path && item.path !== item.name ? ` · ${item.path}` : ''}</Text> : null}
       </View>
       {item.notes_count != null && <Text style={styles.count}>{item.notes_count}</Text>}
       <Text style={styles.chevron}>›</Text>
@@ -192,7 +258,7 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
       ) : (
         <FlatList
           data={folders}
-          keyExtractor={(f) => String(f.id)}
+          keyExtractor={(f) => `${f.workspace ?? ''}-${f.id}`}
           renderItem={renderFolder}
           contentContainerStyle={styles.list}
           refreshControl={
@@ -207,6 +273,24 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
           }
         />
       )}
+      <PromptModal
+        visible={renameFolder != null}
+        title={t('folders.renameTitle')}
+        message={renameFolder?.path ?? renameFolder?.name ?? ''}
+        placeholder={t('folders.renamePrompt')}
+        defaultValue={renameFolder?.name ?? ''}
+        onCancel={() => setRenameFolder(null)}
+        onSubmit={doRename}
+      />
+      <FolderPickerSheet
+        visible={moveFolder != null}
+        client={client}
+        currentFolderId={moveFolder?.parent_id ?? null}
+        title={t('folders.move')}
+        excludeIds={moveFolder ? collectIds(moveFolder) : []}
+        onSelect={doMove}
+        onClose={() => setMoveFolder(null)}
+      />
     </SafeAreaView>
   );
 }

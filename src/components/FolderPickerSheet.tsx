@@ -6,7 +6,13 @@ import { usePalette, spacing, radius, typeFor, shadow, primaryButton,
 import { t } from '../i18n';
 import type { PoznoteClient } from '../api';
 
-interface Folder { id: number; name: string }
+export interface PickerFolder {
+  id: number;
+  name: string;
+  path?: string;
+  workspace?: string | null;
+  depth: number;
+}
 
 interface Props {
   visible: boolean;
@@ -14,27 +20,58 @@ interface Props {
   currentFolderId: number | null;
   onSelect: (folderId: number | null, folderName: string) => void;
   onClose: () => void;
+  /** Eigener Titel (z.B. "Ordner verschieben"); Default: Notiz verschieben */
+  title?: string;
+  /** Gesperrte Ziele (der Ordner selbst + alle Unterordner) — für Ordner-Verschiebung */
+  excludeIds?: number[];
 }
 
-export default function FolderPickerSheet({ visible, client, currentFolderId, onSelect, onClose }: Props) {
+/** Hierarchische Ordnerliste aller Workspaces zu einer flachen Liste mit Tiefe umbrechen */
+function flatten(nodes: any[], depth = 0, out: PickerFolder[] = []): PickerFolder[] {
+  for (const n of nodes ?? []) {
+    out.push({ id: n.id, name: n.name, path: n.path, workspace: n.workspace ?? null, depth });
+    if (n.children?.length) flatten(n.children, depth + 1, out);
+  }
+  return out;
+}
+
+export default function FolderPickerSheet({ visible, client, currentFolderId, onSelect, onClose, title, excludeIds }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   const styles = getStyles(colors, type);
-  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folders, setFolders] = useState<PickerFolder[]>([]);
   const [loading, setLoading] = useState(false);
+  // Ausschluss als stabiler String für die Effekt-Abhängigkeit
+  const excludeKey = (excludeIds ?? []).join(',');
 
   useEffect(() => {
     if (!visible) return;
     setLoading(true);
-    client.listFolders()
-      .then((res) => setFolders((res.folders ?? []) as Folder[]))
-      .catch(() => setFolders([]))
-      .finally(() => setLoading(false));
-  }, [visible, client]);
+    (async () => {
+      try {
+        // Ordner je Workspace hierarchisch laden und zusammenführen
+        const wsRes = await client.listWorkspaces().catch(() => null);
+        const workspaces = (wsRes?.workspaces ?? []).map((w) => w.name);
+        const lists = await Promise.all(
+          (workspaces.length > 0 ? workspaces : [undefined]).map((ws) =>
+            client.listFolders(ws, true)
+              .then((res) => flatten((res.folders ?? []) as any[], 0).map((f) => ({ ...f, workspace: ws })))
+              .catch(() => [] as PickerFolder[]),
+          ),
+        );
+        const blocked = new Set(excludeIds ?? []);
+        setFolders(lists.flat().filter((f) => !blocked.has(f.id)));
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // excludeKey statt Array-Identität: verhindert wiederholtes Nachladen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, client, excludeKey]);
 
   const Row = ({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) => (
     <TouchableOpacity style={styles.row} onPress={onPress}>
-      <Text style={[styles.rowText, active && styles.rowActive]}>{label}</Text>
+      <Text style={[styles.rowText, active && styles.rowActive]} numberOfLines={1}>{label}</Text>
       {active ? <Text style={styles.check}>✓</Text> : null}
     </TouchableOpacity>
   );
@@ -45,17 +82,20 @@ export default function FolderPickerSheet({ visible, client, currentFolderId, on
         <TouchableOpacity style={styles.backdropTouch} onPress={onClose} />
         <View style={[styles.sheet, shadow]}>
           <View style={styles.handle} />
-          <Text style={styles.title}>{t('editor.moveFolder')}</Text>
+          <Text style={styles.title}>{title ?? t('editor.moveFolder')}</Text>
           {loading ? (
             <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>
           ) : (
             <FlatList
               data={folders}
-              keyExtractor={(f) => String(f.id)}
+              keyExtractor={(f) => `${f.workspace ?? ''}-${f.id}`}
               style={styles.list}
               renderItem={({ item }) => (
-                <Row label={`📁 ${item.name}`} active={currentFolderId === item.id}
-                  onPress={() => onSelect(item.id, item.name)} />
+                <Row
+                  label={`${'   '.repeat(item.depth)}📁 ${item.name}${item.workspace ? `  ·  ${item.workspace}` : ''}`}
+                  active={currentFolderId === item.id}
+                  onPress={() => onSelect(item.id, item.path || item.name)}
+                />
               )}
               ListHeaderComponent={
                 <Row label={t('editor.noFolder')} active={currentFolderId == null}

@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { clearDataKey } from './secureStorage';
+import { clearOfflineAttachments } from './attachmentStore';
 
 /**
  * Kontotrennung: Alle lokal gespeicherten Inhalte der aktuellen Sitzung
@@ -31,4 +33,8 @@ export async function clearAllLocalData(): Promise<void> {
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch {}
+  // Heruntergeladene Offline-Anhänge entfernen
+  await clearOfflineAttachments();
+  // Verschlüsselungsschlüssel verwerfen — ein neues Konto startet mit neuem Schlüssel
+  await clearDataKey();
 }

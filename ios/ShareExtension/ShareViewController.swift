@@ -1,13 +1,12 @@
 import UIKit
 import UniformTypeIdentifiers
-import Security
 
 /**
  * Share-Extension: empfängt eine URL oder Text aus dem Teilen-Menü
- * (z.B. Safari) und legt sie als neue Notiz auf dem PozNote-Server ab.
- * Die Zugangsdaten stammen aus der App Group (baseUrl + Benutzername) und
- * der verschlüsselten gemeinsamen Keychain (Passwort) — beides wird von
- * der Haupt-App beim Login geschrieben.
+ * (z.B. Safari) und legt ihn in der App Group als "ausstehenden Share" ab.
+ * Die Haupt-App übernimmt ihn beim nächsten Start und öffnet den Editor mit
+ * Vorbelegung — Zielordner und Tags werden dort vor dem Speichern gewählt
+ * (P1-12). Die Extension selbst braucht dafür keine Zugangsdaten mehr.
  */
 class ShareViewController: UIViewController {
 
@@ -106,7 +105,7 @@ class ShareViewController: UIViewController {
     statusLabel.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(statusLabel)
 
-    saveButton.setTitle("Als Notiz speichern", for: .normal)
+    saveButton.setTitle("In Pozume übernehmen", for: .normal)
     saveButton.titleLabel?.font = .boldSystemFont(ofSize: 16)
     saveButton.backgroundColor = .systemBlue
     saveButton.setTitleColor(.white, for: .normal)
@@ -147,21 +146,14 @@ class ShareViewController: UIViewController {
   // MARK: - Speichern
 
   /**
-   * Speichern-Button: baut aus Titel/URL/Text eine Markdown-Notiz
-   * (Überschrift = Seitentitel oder URL, Inhalt = Link + Text)
-   * und legt sie per POST auf dem Server ab.
+   * Speichern-Button: baut aus Titel/URL/Text die Markdown-Vorbelegung
+   * (Überschrift = Seitentitel oder URL, Inhalt = Link + Text) und legt sie
+   * als "ausstehenden Share" in der App Group ab. Die Haupt-App übernimmt den
+   * Eintrag beim nächsten Start, zeigt den Editor mit Vorbelegung und lässt
+   * Zielordner und Tags vor dem Speichern wählen. Der Eintrag wird von der
+   * App sofort beim Übernehmen entnommen — der Inhalt landet genau einmal.
    */
   @objc private func saveTapped() {
-    saveButton.isEnabled = false
-    statusLabel.text = "Speichert…"
-
-    // Ohne Anmeldung in der Haupt-App kann die Extension nichts speichern
-    guard let (config, password) = loadConfig() else {
-      statusLabel.text = "Keine Anmeldung — bitte zuerst in der Pozume-App einloggen."
-      saveButton.isEnabled = true
-      return
-    }
-
     // Überschrift: Seitentitel, sonst URL-Anfang, sonst Fallback
     let heading = sharedTitle.isEmpty ? (sharedUrl.isEmpty ? "Geteilte Notiz" : String(sharedUrl.prefix(60))) : sharedTitle
     // Inhalt: URL als Markdown-Link, darunter der geteilte Text
@@ -173,122 +165,22 @@ class ShareViewController: UIViewController {
       content += sharedText
     }
     if content.isEmpty {
-      statusLabel.text = "Nichts zu speichern."
-      saveButton.isEnabled = true
+      statusLabel.text = "Nichts zu übernehmen."
       return
     }
 
-    createNote(config: config, password: password, heading: heading, content: content) { [weak self] success, message in
-      DispatchQueue.main.async {
-        guard let self else { return }
-        if success {
-          // Nach Erfolg kurz Bestätigung zeigen, dann Extension schließen
-          self.statusLabel.text = "✓ Gespeichert"
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            self.extensionContext?.completeRequest(returningItems: nil)
-          }
-        } else {
-          self.statusLabel.text = message
-          self.saveButton.isEnabled = true
-        }
-      }
-    }
-  }
-
-  /**
-   * Server-Adresse + Benutzername aus der App Group und Passwort aus der
-   * gemeinsamen Keychain lesen; nil, wenn noch nicht angemeldet.
-   */
-  private func loadConfig() -> (config: ServerConfig, password: String)? {
-    guard
-      let raw = UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.server"),
-      let data = raw.data(using: .utf8),
-      let config = try? JSONDecoder().decode(ServerConfig.self, from: data),
-      let password = KeychainStore.readPassword()
-    else { return nil }
-    return (config, password)
-  }
-
-  /**
-   * Legt die Notiz an (POST /api/v1/notes, Markdown-Typ).
-   * Auth identisch zur App: Basic Auth + X-User-ID-Header.
-   * completion: (Erfolg, Fehlermeldung)
-   */
-  private func createNote(config: ServerConfig, password: String, heading: String, content: String, completion: @escaping (Bool, String) -> Void) {
-    guard let url = URL(string: "\(config.baseUrl)/api/v1/notes") else {
-      completion(false, "Ungültige Server-Adresse")
+    let payload: [String: String] = ["heading": heading, "content": content]
+    guard let data = try? JSONSerialization.data(withJSONObject: payload),
+          let raw = String(data: data, encoding: .utf8),
+          let group = UserDefaults(suiteName: "group.de.inthielligent.pozume") else {
+      statusLabel.text = "Speichern nicht möglich."
       return
     }
-    var request = URLRequest(url: url, timeoutInterval: 15)
-    request.httpMethod = "POST"
-    let raw = "\(config.username):\(password)".data(using: .utf8)?.base64EncodedString() ?? ""
-    request.setValue("Basic \(raw)", forHTTPHeaderField: "Authorization")
-    request.setValue("1", forHTTPHeaderField: "X-User-ID")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    group.set(raw, forKey: "pozume.pendingShare")
 
-    let body: [String: Any] = [
-      "heading": heading,
-      "content": content,
-      "type": "markdown",
-    ]
-    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-    URLSession.shared.dataTask(with: request) { _, response, error in
-      if let error = error {
-        completion(false, "Netzwerkfehler: \(error.localizedDescription)")
-        return
-      }
-      guard let http = response as? HTTPURLResponse else {
-        completion(false, "Unerwartete Antwort")
-        return
-      }
-      if (200...299).contains(http.statusCode) {
-        completion(true, "")
-      } else {
-        completion(false, "Serverfehler (HTTP \(http.statusCode))")
-      }
-    }.resume()
-  }
-}
-
-/** Server-Adresse und Benutzername aus der App Group (unkritisch, JSON). */
-struct ServerConfig: Codable {
-  let baseUrl: String
-  let username: String
-}
-
-/**
- * Zugriff auf das Server-Passwort in der gemeinsamen Keychain.
- * Die Access-Group ("TEAMID.de.inthielligent.pozume") hat die Haupt-App
- * aufgelöst und in der App Group hinterlegt (Schlüssel "pozume.keychainGroup");
- * im Simulator fallback ohne Team-Präfix.
- */
-enum KeychainStore {
-  private static let keychainService = "pozume.server"
-  private static let keychainAccount = "password"
-  private static let fallbackGroup = "de.inthielligent.pozume"
-
-  /** Von der Haupt-App aufgelöste Access-Group aus der App Group lesen. */
-  private static var accessGroup: String {
-    UserDefaults(suiteName: "group.de.inthielligent.pozume")?.string(forKey: "pozume.keychainGroup") ?? fallbackGroup
-  }
-
-  /** Liest das Passwort aus der Keychain; nil, wenn keins gespeichert ist. */
-  static func readPassword() -> String? {
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: keychainService,
-      kSecAttrAccount as String: keychainAccount,
-      kSecAttrAccessGroup as String: accessGroup,
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne,
-    ]
-    var item: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-          let data = item as? Data,
-          let password = String(data: data, encoding: .utf8) else {
-      return nil
+    statusLabel.text = "✓ Übernommen — in der Pozume-App fertigstellen"
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+      self.extensionContext?.completeRequest(returningItems: nil)
     }
-    return password
   }
 }

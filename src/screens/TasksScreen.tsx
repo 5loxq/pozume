@@ -24,6 +24,8 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   const [taskLists, setTaskLists] = useState<Array<{ id: number; heading: string }>>([]);
   const [addPrompt, setAddPrompt] = useState(false);
   const [addText, setAddText] = useState('');
+  const [duePrompt, setDuePrompt] = useState(false);
+  const [dueTask, setDueTask] = useState<(Task & { serverTaskId?: number; dueAt?: string | null }) | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,10 +111,9 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
 
   const confirmDeleteTask = (task: Task & { serverTaskId?: number }) => {
     if (task.serverTaskId == null) return;
-    Alert.alert(t('tasks.deleteTitle'), task.text, [
-      { text: t('common.cancel'), style: 'cancel' },
-      {
-        text: t('common.delete'), style: 'destructive',
+    Alert.alert(task.text, '', [
+      { text: t('tasks.setDue'), onPress: () => { setDueTask(task); setDuePrompt(true); } },
+      { text: t('common.delete'), style: 'destructive',
         onPress: async () => {
           try {
             await client.deleteTask(task.noteId, task.serverTaskId!);
@@ -121,9 +122,28 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
           } catch (e: any) {
             Alert.alert(t('common.error'), e?.message ?? String(e));
           }
-        },
-      },
+        } },
+      { text: t('common.cancel'), style: 'cancel' },
     ]);
+  };
+
+  // Faelligkeit einer Server-Aufgabe setzen (P1-13)
+  const submitDueDate = async (value: string) => {
+    const task = dueTask;
+    setDuePrompt(false);
+    if (!task?.serverTaskId) return;
+    const m = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) {
+      Alert.alert(t('common.error'), t('tasks.duePrompt'));
+      return;
+    }
+    try {
+      await client.updateTask(task.noteId, task.serverTaskId, { due_at: value.trim() });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      load();
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
   };
 
   // --- Aufgabe hinzufügen: Text eingeben, dann Ziel-Taskliste wählen ---
@@ -258,6 +278,14 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
         defaultValue={addText}
         onCancel={() => setAddPrompt(false)}
         onSubmit={submitAddText}
+      />
+      <PromptModal
+        visible={duePrompt}
+        title={t('tasks.setDue')}
+        placeholder={t('tasks.duePrompt')}
+        defaultValue={dueTask?.dueAt?.split('T')[0] ?? ''}
+        onCancel={() => setDuePrompt(false)}
+        onSubmit={submitDueDate}
       />
     </SafeAreaView>
   );

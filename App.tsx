@@ -21,7 +21,7 @@ import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
 import { clearAllLocalData } from './src/api/localData';
 // App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
-import { saveServerConfig, clearServerConfig } from './modules/pozume-app-group';
+import { saveServerConfig, clearServerConfig, readValue, removeValue } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
 import * as Linking from 'expo-linking';
 import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
@@ -29,7 +29,7 @@ import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
   | { name: 'list' }
-  | { name: 'editor'; note: Note | null; drawing?: boolean }
+  | { name: 'editor'; note: Note | null; drawing?: boolean; prefill?: { heading: string; content: string } | null }
   | { name: 'folders' }
   | { name: 'folderNotes'; folderId: number; folderName: string }
   | { name: 'trash' }
@@ -88,6 +88,8 @@ function AppInner() {
           c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
           // Widget + Share-Extension brauchen die Zugangsdaten aus der App Group
           saveServerConfig(stored);
+          // Geteilte Inhalte aus der Share-Extension uebernehmen
+          pickPendingShare();
         }
         await loadLocaleOverride();
         await loadThemeOverride();
@@ -110,6 +112,24 @@ function AppInner() {
     saveServer(c.cfg).catch(() => {});
     saveServerConfig(c.cfg);
     c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+  }, []);
+
+  /**
+   * Geteilte Inhalte aus der Share-Extension uebernehmen (P1-12): Die Extension
+   * legt den Inhalt in der App Group ab; hier oeffnet die App den Editor mit
+   * Vorbelegung — Ordner und Tags werden vor dem Speichern ausgewaehlt.
+   * Der Eintrag wird sofort entnommen, damit der Inhalt genau einmal ankommt.
+   */
+  const pickPendingShare = useCallback(() => {
+    try {
+      const raw = readValue('pozume.pendingShare');
+      if (!raw) return;
+      removeValue('pozume.pendingShare');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.heading === 'string' && typeof parsed.content === 'string') {
+        setRoute({ name: 'editor', note: null, prefill: { heading: parsed.heading, content: parsed.content } });
+      }
+    } catch {}
   }, []);
 
   const openNote = useCallback((note: Note) => setRoute({ name: 'editor', note }), []);
@@ -158,7 +178,10 @@ function AppInner() {
       // App-Sperre: beim Hintergrundwechsel sperren — schützt auch die
       // Vorschau im App-Wechsler (die Sperransicht wird gerendert)
       if (state === 'background' && lockEnabledRef.current) setLocked(true);
-      if (state === 'active') flushOffline();
+      if (state === 'active') {
+        flushOffline();
+        pickPendingShare();
+      }
     });
     return () => sub.remove();
   }, [flushOffline]);
@@ -213,6 +236,8 @@ function AppInner() {
               client={client}
               note={route.note}
               drawing={route.drawing}
+              prefill={route.prefill}
+              allNotes={allNotes}
               onClose={closeEditor}
               onSaved={onSaved}
               onDeleted={onDeleted}
@@ -233,6 +258,8 @@ function AppInner() {
           client={client}
           note={route.note}
           drawing={route.drawing}
+          prefill={route.prefill}
+          allNotes={allNotes}
           onClose={closeEditor}
           onSaved={onSaved}
           onDeleted={onDeleted}

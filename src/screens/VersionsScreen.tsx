@@ -76,6 +76,9 @@ export default function VersionsScreen({ client, noteId, onBack }: Props) {
         text: t('versions.restore'), style: 'destructive',
         onPress: async () => {
           try {
+            // Vor der Wiederherstellung den aktuellen Stand sichern (P1-11):
+            // Der vorherige Inhalt bleibt als Snapshot wiederherstellbar
+            await client.createSnapshot(noteId, true).catch(() => {});
             await client.restoreSnapshot(noteId, snap.snapshot_key, true);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert('🪶', t('versions.restored'), [{ text: t('common.done'), onPress: onBack }]);

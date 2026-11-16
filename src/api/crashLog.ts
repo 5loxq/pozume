@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureSetItem, secureGetItem } from './secureStorage';
 
 /**
  * Lokales Absturzprotokoll: nicht abgefangene JS-Fehler werden mit Zeitstempel
- * in AsyncStorage festgehalten (die letzten 20) und sind in den Einstellungen
+ * verschlüsselt festgehalten (die letzten 20) und sind in den Einstellungen
  * einsehbar — ein Mindestmaß an Diagnose ohne Cloud-Dienst.
  */
 const KEY = 'pozume.crashlog.v1';
@@ -17,7 +18,7 @@ export interface CrashEntry {
 
 async function readAll(): Promise<CrashEntry[]> {
   try {
-    const raw = await AsyncStorage.getItem(KEY);
+    const raw = await secureGetItem(KEY);
     return raw ? JSON.parse(raw) : [];
   } catch { return []; }
 }
@@ -44,7 +45,7 @@ export function installCrashHandler(): void {
           // Notizinhalte enthalten (z.B. wenn ein Server sie zurückgibt)
           { t: Date.now(), message: String(error?.message ?? error).slice(0, 300), stack: error?.stack?.slice(0, 2000), fatal: !!isFatal },
         ].slice(-MAX_ENTRIES);
-        return AsyncStorage.setItem(KEY, JSON.stringify(next));
+        return secureSetItem(KEY, JSON.stringify(next));
       })
       .catch(() => {});
     prev?.(error, isFatal);
