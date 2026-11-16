@@ -12,6 +12,8 @@ import { usePalette, spacing, radius, typeFor, shadow,
 import { t, Locale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer, getAppLock } from '../api/store';
+import { queueSize } from '../api/offlineQueue';
+import { clearAllLocalData } from '../api/localData';
 import { base64FromBytes } from '../utils';
 import { readCrashLog, clearCrashLog, type CrashEntry } from '../api/crashLog';
 
@@ -66,13 +68,17 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
     onLockChange(v);
   };
 
-  const confirmLogout = () => {
-    Alert.alert(t('settings.logout'), t('settings.logoutConfirm'), [
+  const confirmLogout = async () => {
+    // Ungesicherte Offline-Änderungen vorher behandeln: Beim Abmelden werden
+    // alle lokalen Daten gelöscht — die Queue würde still verloren gehen.
+    const pending = await queueSize().catch(() => 0);
+    Alert.alert(t('settings.logout'), pending > 0 ? t('settings.logoutQueuedText', { n: pending }) : t('settings.logoutConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
       {
         text: t('settings.logout'), style: 'destructive',
         onPress: async () => {
           await clearServer();
+          await clearAllLocalData();
           onLoggedOut();
         },
       },

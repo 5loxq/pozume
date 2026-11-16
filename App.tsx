@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, useWindowDimensions, AppState, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
+import { clearAllLocalData } from './src/api/localData';
 // App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
 import { saveServerConfig, clearServerConfig } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
@@ -48,6 +49,8 @@ function AppInner() {
   const [client, setClient] = useState<PoznoteClient | null>(null);
   const [booting, setBooting] = useState(true);
   const [locked, setLocked] = useState(false);
+  // App-Lock aktiv? (Ref, damit der AppState-Listener aktuellen Stand sieht)
+  const lockEnabledRef = useRef(false);
   const [route, setRoute] = useState<Route>({ name: 'list' });
   const [, forceRender] = useState(0);
   const [allNotes, setAllNotes] = useState<Note[]>([]);
@@ -79,7 +82,9 @@ function AppInner() {
         if (stored) {
           const c = new PoznoteClient(stored);
           setClient(c);
-          setLocked(await getAppLock());
+          const lockOn = await getAppLock();
+          lockEnabledRef.current = lockOn;
+          setLocked(lockOn);
           c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
           // Widget + Share-Extension brauchen die Zugangsdaten aus der App Group
           saveServerConfig(stored);
@@ -122,7 +127,9 @@ function AppInner() {
   }, []);
 
   const onLockToggle = useCallback((enabled: boolean) => {
-    // Aktivieren sperrt die App erst beim nächsten Start; Deaktivieren entsperrt sofort.
+    // Aktivieren sperrt die App beim nächsten Start und bei Rückkehr aus dem
+    // Hintergrund; Deaktivieren entsperrt sofort.
+    lockEnabledRef.current = enabled;
     if (!enabled) setLocked(false);
   }, []);
 
@@ -137,6 +144,10 @@ function AppInner() {
         client.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
         Alert.alert('🪶', t('offline.flushed', { n: res.flushed }));
       }
+      // Konflikte: Offline-Fassungen liegen als Entwurf in den Notizen bereit
+      if (res.conflicts.length > 0) {
+        Alert.alert(t('offline.conflictTitle'), t('offline.conflictText', { n: res.conflicts.length }));
+      }
     } catch {}
   }, [client]);
 
@@ -144,6 +155,9 @@ function AppInner() {
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
+      // App-Sperre: beim Hintergrundwechsel sperren — schützt auch die
+      // Vorschau im App-Wechsler (die Sperransicht wird gerendert)
+      if (state === 'background' && lockEnabledRef.current) setLocked(true);
       if (state === 'active') flushOffline();
     });
     return () => sub.remove();
@@ -318,9 +332,10 @@ function AppInner() {
           client={client}
           onLockChange={onLockToggle}
           onLocaleChange={() => {}}
-          // Logout: Client zurücksetzen und App-Group-Zugangsdaten löschen,
-          // damit Widget/Share-Extension keine gültigen Credentials mehr haben
-          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); clearServerConfig(); }}
+          // Logout: Client zurücksetzen, App-Group-Zugangsdaten und alle lokalen
+          // Inhalte (Cache, Entwürfe, Offline-Queue) löschen — ein neues Konto
+          // darf keine Daten des vorherigen sehen
+          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); clearServerConfig(); clearAllLocalData(); }}
           onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}
         />

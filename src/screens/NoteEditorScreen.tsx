@@ -11,6 +11,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite } from '../api/offlineQueue';
+import { saveDraft, readDraft, clearDraft, type Draft } from '../api/drafts';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
@@ -39,6 +40,10 @@ interface Attachment { id: string; filename: string; original_filename?: string;
 /** Farb-Palette für Notiz-Karten (Hex geht direkt an den Server, unabhängig von dessen Palette) */
 const NOTE_COLORS = ['#3b82f6', '#16a34a', '#dc2626', '#f59e0b', '#7c3aed', '#db2777', '#0d9488'];
 
+/** Notiz-Typen, die der Editor sicher bearbeiten kann. Alles andere (html, tasklist, …)
+ *  wird schreibgeschützt geöffnet — ein ungeeigneter Editor würde die Formatierung beschädigen. */
+const EDITABLE_TYPES = new Set(['markdown', 'note', 'excalidraw']);
+
 export default function NoteEditorScreen({ client, note, drawing, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
@@ -49,17 +54,26 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const [heading, setHeading] = useState(note?.heading ?? '');
   const [content, setContent] = useState(isNew && drawing ? emptyDrawingHtml() : (note?.content ?? ''));
   const [tags, setTags] = useState(note?.tags ?? '');
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'queued'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'queued' | 'failed'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
   const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
   const [favorite, setFavorite] = useState(!!note?.favorite);
   // Die Notizliste liefert keinen Inhalt — die volle Notiz muss nachgeladen werden,
   // bevor der Editor interaktiv wird (sonst überschreibt Autosave leeren Inhalt).
   const [loaded, setLoaded] = useState(isNew);
+  // Nachladen fehlgeschlagen (offline): Editor sperren statt leeren Inhalt
+  // editierbar zu zeigen — Autosave würde sonst den echten Inhalt überschreiben
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const noteIdRef = useRef<number | null>(note?.id ?? null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ heading, content, tags });
   latest.current = { heading, content, tags };
+  // Entwurf wiederhergestellt (letzte Sitzung endete vor dem Synchronisieren)
+  const [draftRestored, setDraftRestored] = useState(false);
+  // Offline-Fassung, die beim Synchronisieren mit dem Server kollidiert ist
+  const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   // Version-Token des Servers für optimistische Konkurrenz (if_version)
   const versionRef = useRef<string | undefined>(note?.version);
   // Eindeutiger Schlüssel für die Offline-Queue (neue Notizen haben noch keine ID)
@@ -99,6 +113,9 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
       }
       setSaveState('saved');
       removeWrite(queueKey).catch(() => {});
+      // Server-Stand ist synchron — lokale Entwürfe dieser Notiz verwerfen
+      clearDraft(localQueueKey).catch(() => {});
+      if (noteIdRef.current != null) clearDraft(`note-${noteIdRef.current}`).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       if (e?.status === 0) {
@@ -109,6 +126,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           kind: noteIdRef.current == null ? 'create' : 'update',
           noteId: noteIdRef.current ?? undefined,
           body,
+          if_version: versionRef.current,
         }).catch(() => {});
         setSaveState('queued');
         return;
@@ -118,7 +136,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         handleVersionConflict(e.data.current);
         return;
       }
-      setSaveState('dirty');
+      setSaveState('failed');
       const msg = e?.message ?? String(e);
       Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
     }
@@ -144,10 +162,39 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     ]);
   };
 
-  // Autosave 1.2s nach letzter Eingabe
+  /**
+   * Konflikt-Entwurf aus der Offline-Synchronisierung (409 beim Nachtragen):
+   * lokale Fassung in den Editor laden oder die neuere Server-Fassung behalten.
+   * Beide Fassungen bleiben bis zur Entscheidung erhalten.
+   */
+  const resolveConflictDraft = (useLocal: boolean) => {
+    const id = noteIdRef.current;
+    const draft = conflictDraft;
+    setConflictDraft(null);
+    if (id != null) clearDraft(`conflict-${id}`).catch(() => {});
+    if (useLocal && draft) {
+      setHeading(draft.heading);
+      setContent(draft.content);
+      setTags(draft.tags);
+      scheduleSave();
+    }
+  };
+
+  // Autosave 1.2s nach letzter Eingabe; Entwurf bereits nach 400ms lokal sichern —
+  // überlebt App-Abbruch innerhalb der Autosave-Verzögerung oder während des Requests
+  const draftKeyFor = (id: number | null) => (id != null ? `note-${id}` : localQueueKey);
+  const saveDraftNow = () => {
+    saveDraft(draftKeyFor(noteIdRef.current), {
+      heading: latest.current.heading,
+      content: latest.current.content,
+      tags: latest.current.tags,
+    }).catch(() => {});
+  };
   const scheduleSave = () => {
     setSaveState('dirty');
     ensureLock();
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => { draftTimer.current = null; saveDraftNow(); }, 400);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persist, 1200);
   };
@@ -199,6 +246,11 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   const persistRef = useRef(persist);
   persistRef.current = persist;
   useEffect(() => () => {
+    if (draftTimer.current) {
+      clearTimeout(draftTimer.current);
+      draftTimer.current = null;
+      saveDraftNow();
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       persistRef.current();
@@ -277,6 +329,9 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
+  // Nicht unterstützte Formate (html, tasklist, …) schreibgeschützt öffnen —
+  // Bearbeiten im Text-Editor würde die Struktur beschädigen
+  const formatReadOnly = !isNew && !isExcalidraw && noteType != null && !EDITABLE_TYPES.has(noteType);
 
   // Volle Notiz nachladen (Inhalt fehlt in der Listen-Antwort)
   useEffect(() => {
@@ -284,7 +339,8 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     let cancelled = false;
     client.getNote(note.id)
       .then(async (res) => {
-        if (cancelled || !res.note) return;
+        if (cancelled) return;
+        if (!res.note) { setLoadFailed(true); return; }
         const n = res.note;
         const c = n.content ?? '';
         setHeading(n.heading ?? '');
@@ -299,6 +355,22 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
         versionRef.current = n.version;
         // Ältere Server-Versionen kennen kein `locked`-Feld — Chip dann gar nicht erst anbieten
         setServerLockSupported('locked' in n);
+        // Entwurf aus der letzten Sitzung wiederherstellen: Änderungen, die nie
+        // synchronisiert wurden (App-Abbruch vor Autosave oder während des Requests).
+        // Erfolgreich synchronisierte Entwürfe wurden beim Speichern gelöscht.
+        const draft = await readDraft(`note-${note.id}`);
+        if (!cancelled && draft &&
+            (draft.heading !== (n.heading ?? '') || draft.content !== (n.content ?? '') || draft.tags !== (n.tags ?? ''))) {
+          setHeading(draft.heading);
+          setContent(draft.content);
+          setTags(draft.tags);
+          setDraftRestored(true);
+          scheduleSave();
+        }
+        // Konflikt-Entwurf: Offline-Fassung kollidierte beim Synchronisieren
+        // mit einer neueren Server-Fassung — beide bleiben erhalten.
+        const conflict = await readDraft(`conflict-${note.id}`);
+        if (!cancelled && conflict) setConflictDraft(conflict);
         // Zeichnung nur als SVG-Anhang? (älteres Format: Inhalt leer oder nur <img>) → SVG laden
         if (!isDrawingContent(c) && (c.trim() === '' || c.includes('excalidraw'))) {
           try {
@@ -315,11 +387,11 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             }
           } catch {}
         }
+        if (!cancelled) setLoaded(true);
       })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoaded(true); });
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [note?.id]);
+  }, [note?.id, reloadKey, client]);
 
   // Gespuerrte Notiz: Face ID/Touch ID anbieten, sonst PIN (einmal pro Oeffnen)
   useEffect(() => {
@@ -750,9 +822,34 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
     saveState === 'saving' ? t('editor.saving') :
     saveState === 'saved' ? t('editor.saved') :
     saveState === 'queued' ? t('editor.queued') :
+    saveState === 'failed' ? t('editor.failed') :
     saveState === 'dirty' ? t('editor.unsaved') : '';
 
   if (!loaded) {
+    if (loadFailed) {
+      return (
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+          <View style={styles.pinTopBar}>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.back}>←</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl }}>
+            <Text style={{ fontSize: 44, marginBottom: spacing.md }}>📴</Text>
+            <Text style={[type.h2, { marginBottom: spacing.sm, textAlign: 'center' }]}>{t('editor.loadFailedTitle')}</Text>
+            <Text style={[type.muted, { textAlign: 'center', marginBottom: spacing.lg }]}>
+              {t('editor.loadFailedText')}
+            </Text>
+            <TouchableOpacity
+              style={primaryButton}
+              onPress={() => { setLoadFailed(false); setLoaded(false); setReloadKey((k) => k + 1); }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{t('common.retry')}</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -959,6 +1056,35 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
           </Text>
         </View>
       )}
+      {draftRestored && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            🕘 {t('editor.draftRestored')}
+          </Text>
+        </View>
+      )}
+      {conflictDraft && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.dangerSoft }]}>
+          <Text style={{ color: colors.danger, fontSize: 13 }}>
+            ⚠️ {t('editor.conflictPending')}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: spacing.lg, marginTop: 6 }}>
+            <TouchableOpacity onPress={() => resolveConflictDraft(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: colors.danger, fontWeight: '700', fontSize: 12 }}>{t('editor.conflictUseLocal')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => resolveConflictDraft(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={{ color: colors.textMuted, fontWeight: '700', fontSize: 12 }}>{t('editor.conflictKeepServer')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      {formatReadOnly && (
+        <View style={[styles.missingBanner, { backgroundColor: colors.primarySoft }]}>
+          <Text style={{ color: colors.primary, fontSize: 13 }}>
+            👁 {t('editor.readonlyFormat')}
+          </Text>
+        </View>
+      )}
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <TextInput
           style={styles.titleInput}
@@ -986,7 +1112,7 @@ export default function NoteEditorScreen({ client, note, drawing, onClose, onSav
             value={content}
             onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
             selection={findSelection}
-            editable={!serverLocked}
+            editable={!serverLocked && !formatReadOnly}
             multiline
             textAlignVertical="top"
           />

@@ -280,5 +280,17 @@ export const de = {
   'settings.crashLog': 'Absturzprotokoll',
   'settings.crashEmpty': 'Keine Fehler aufgezeichnet.',
   'settings.crashClear': 'Leeren',
+  'editor.failed': 'Fehlgeschlagen',
+  'editor.loadFailedTitle': 'Notiz konnte nicht geladen werden',
+  'editor.loadFailedText': 'Der Inhalt ist ohne Serververbindung nicht verfügbar. Bearbeiten ist erst nach dem Laden möglich, damit keine Inhalte verloren gehen.',
+  'editor.draftRestored': 'Entwurf wiederhergestellt — ungespeicherte Änderungen aus der letzten Sitzung',
+  'editor.conflictPending': 'Offline-Änderung kollidiert mit einer neueren Server-Fassung',
+  'editor.conflictUseLocal': 'Offline-Fassung wiederherstellen',
+  'editor.conflictKeepServer': 'Server-Fassung behalten',
+  'editor.readonlyFormat': 'Dieses Format wird nur lesend unterstützt — Bearbeiten könnte die Formatierung beschädigen. Über „Umwandeln“ kann es in Markdown konvertiert werden.',
+  'login.insecure': 'Unsichere Verbindung: Bitte eine HTTPS-Server-Adresse verwenden.',
+  'settings.logoutQueuedText': 'Es warten {n} offline gespeicherte Änderung(en) auf Synchronisierung — sie werden beim Abmelden vom Gerät gelöscht. Jetzt abmelden?',
+  'offline.conflictTitle': 'Konflikt bei Synchronisierung',
+  'offline.conflictText': '{n} Notiz(en) wurde(n) auf dem Server zwischenzeitlich geändert. Die offline bearbeitete Fassung liegt bereit und kann in der Notiz wiederhergestellt werden.',
 } as const;
 export type TranslationKey = keyof typeof de;

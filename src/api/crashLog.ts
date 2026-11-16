@@ -40,7 +40,9 @@ export function installCrashHandler(): void {
       .then((entries) => {
         const next = [
           ...entries,
-          { t: Date.now(), message: String(error?.message ?? error), stack: error?.stack?.slice(0, 2000), fatal: !!isFatal },
+          // Meldungen kürzen: Fehlerprotokolle dürfen keine vollständigen
+          // Notizinhalte enthalten (z.B. wenn ein Server sie zurückgibt)
+          { t: Date.now(), message: String(error?.message ?? error).slice(0, 300), stack: error?.stack?.slice(0, 2000), fatal: !!isFatal },
         ].slice(-MAX_ENTRIES);
         return AsyncStorage.setItem(KEY, JSON.stringify(next));
       })

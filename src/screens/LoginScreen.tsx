@@ -6,7 +6,8 @@ import { usePalette, spacing, radius, typeFor, shadowSoft, primaryButton,
 } from '../theme';
 import { t } from '../i18n';
 import { PoznoteClient } from '../api';
-import { saveServer } from '../api/store';
+import { saveServer, loadServer } from '../api/store';
+import { clearAllLocalData } from '../api/localData';
 
 export default function LoginScreen({ onConnected }: { onConnected: (c: any) => void }) {
   const colors = usePalette();
@@ -24,8 +25,20 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
     try {
       let base = serverUrl.trim().replace(/\/+$/, '');
       if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+      // Klartext-HTTP ablehnen: Notizinhalte und Zugangsdaten dürfen nicht
+      // unverschlüsselt übertragen werden
+      if (/^http:\/\//i.test(base)) {
+        setError(t('login.insecure'));
+        return;
+      }
       const client = new PoznoteClient({ baseUrl: base, username, password });
       await client.listNotes();
+      // Kontowechsel: lokale Daten des vorherigen Kontos entfernen,
+      // bevor die neuen Zugangsdaten gespeichert werden
+      const prev = await loadServer().catch(() => null);
+      if (prev && (prev.baseUrl !== base || prev.username !== username)) {
+        await clearAllLocalData();
+      }
       await saveServer({ baseUrl: base, username, password }).catch(() => {});
       onConnected(client);
     } catch (e: any) {
