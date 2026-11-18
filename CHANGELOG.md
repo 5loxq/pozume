@@ -5,6 +5,12 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-18 — Review-Fixes: P1/P2/P3 in App, API-Layer, Share-Extension und Widget
+
+*Commit `859c749`*
+
+Gesamtabarbeitung des Code-Reviews (2 Review-Agenten, ~9600 Zeilen TS + native iOS-Teile) nach ausgiebigem iOS-Test (tsc fehlerfrei, Smoke-Test 22/22 gegen den Live-Server, Clean-Build aller drei Targets, Simulator-Launch stabil). TS P1: Doppel-Create-Race im Editor, loadMore-Guard bei Serversuche, Bestaetigungsdialog vor Public-Share aus der Liste, LockScreen mit Geraete-Passcode-Fallback, Tasks im Dark Mode lesbar. TS P2: Flush-Mutex der Offline-Queue, aborted/network unterscheidbar, Timeouts fuer Attachment-/Export-Aufrufe, Notiz-PIN als salted SHA-256 mit Klartext-Migration + Rate-Limit, Erinnerungs-Reihenfolge, Crash-Log-Mitigation, Sequenz-Schutz beim Listenladen, Canvas-Ursprung, Task-Toggle mit if_version. iOS P1: Deep-Links im Scene-Lifecycle (openURLContexts + Kaltstart-Weiterleitung), synchronize() in der Share-Extension. iOS P2/P3: userId in der Server-Config, reloadWidget() nach Login/Logout/Save, pendingShare als Queue, Bild-Teilen end-to-end, loadItem-Fallbacks, echtes total im Widget, HTTP-Status-Texte, Keychain-Flag konsistent, Widget-Accessory-Families ab iOS 16, Markdown-Escaping, LSMinimumSystemVersion 15.1. Bewusst nicht gefixt: Redirect-Leck vor Erst-Request (RN-Limitation), Universal Links (Domain-Ownership noetig), Keychain-TeamID-Parsing-Workaround. Restrisiko: Deep-Link, Share-Flow und Widget auf dem Geraet verifizieren.
+
 ## 2026-11-16 — iOS: Versions-Sync 0.6.0 (Build 4) fuer App, Share-Extension und Widget
 
 *Commit `7d643a9`*
