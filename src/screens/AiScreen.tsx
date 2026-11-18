@@ -65,10 +65,14 @@ export default function AiScreen({ client, notes, onBack }: Props) {
       return;
     }
     const c = { baseUrl: fBaseUrl.trim(), apiKey: fKey.trim(), model: fModel.trim() };
-    await saveAiConfig(c);
-    setCfg(c);
-    setShowConfig(false);
-    setFKey('');
+    try {
+      await saveAiConfig(c);
+      setCfg(c);
+      setShowConfig(false);
+      setFKey('');
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
   };
 
   const noteContext = (): string => {

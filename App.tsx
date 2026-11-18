@@ -21,7 +21,8 @@ import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
 import { clearAllLocalData } from './src/api/localData';
 // App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
-import { saveServerConfig, clearServerConfig, readValue, removeValue } from './modules/pozume-app-group';
+import { saveServerConfig, clearServerConfig, readValue, removeValue, saveValue,
+  reloadWidget, exportSharedAttachment } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
 import * as Linking from 'expo-linking';
 import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
@@ -29,7 +30,7 @@ import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
   | { name: 'list' }
-  | { name: 'editor'; note: Note | null; drawing?: boolean; prefill?: { heading: string; content: string } | null }
+  | { name: 'editor'; note: Note | null; drawing?: boolean; prefill?: { heading: string; content: string } | null; initialAttachment?: { uri: string; name?: string } | null }
   | { name: 'folders' }
   | { name: 'folderNotes'; folderId: number; folderName: string }
   | { name: 'trash' }
@@ -62,12 +63,15 @@ function AppInner() {
   // Absturzprotokoll: globale Fehler aufzeichnen (einmalig)
   useEffect(() => { installCrashHandler(); }, []);
 
-  // Deep-Links: pozume://note/123 öffnet die Notiz direkt
+  // Deep-Links: nur das eigene Scheme pozume:// wird behandelt —
+  // pozume://note/123 öffnet die Notiz direkt, pozume://home (Widget-Tap)
+  // führt zur Liste
   useEffect(() => {
     const open = (url?: string | null) => {
-      if (!url) return;
-      const m = url.match(/\/\/note\/(\d+)/);
+      if (!url || !url.startsWith('pozume://')) return;
+      const m = url.match(/^pozume:\/\/note\/(\d+)/);
       if (m) setRoute({ name: 'editor', note: { id: Number(m[1]), heading: '' } });
+      else if (url === 'pozume://home') setRoute({ name: 'list' });
     };
     Linking.getInitialURL().then(open).catch(() => {});
     const sub = Linking.addEventListener('url', (e) => open(e.url));
@@ -111,23 +115,38 @@ function AppInner() {
     setClient(c);
     saveServer(c.cfg).catch(() => {});
     saveServerConfig(c.cfg);
+    // Widget hat jetzt gueltige Zugangsdaten -> sofort aktualisieren
+    reloadWidget();
     c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
   }, []);
 
   /**
    * Geteilte Inhalte aus der Share-Extension uebernehmen (P1-12): Die Extension
-   * legt den Inhalt in der App Group ab; hier oeffnet die App den Editor mit
-   * Vorbelegung — Ordner und Tags werden vor dem Speichern ausgewaehlt.
-   * Der Eintrag wird sofort entnommen, damit der Inhalt genau einmal ankommt.
+   * legt die Inhalte als Queue (JSON-Array, neueste zuletzt) in der App Group
+   * ab; hier oeffnet die App den Editor mit Vorbelegung — Ordner und Tags
+   * werden vor dem Speichern ausgewaehlt. Es wird nur der neueste Eintrag
+   * entnommen; aeltere bleiben liegen und werden beim naechsten Vordergrund-
+   * Wechsel abgearbeitet, damit aufeinanderfolgende Shares nicht verloren gehen.
+   * Enthaelt der Eintrag ein Bild (imagePath), wird es aus der App Group in den
+   * Cache kopiert und dem Editor als Anhang mitgegeben.
    */
   const pickPendingShare = useCallback(() => {
     try {
       const raw = readValue('pozume.pendingShare');
       if (!raw) return;
-      removeValue('pozume.pendingShare');
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.heading === 'string' && typeof parsed.content === 'string') {
-        setRoute({ name: 'editor', note: null, prefill: { heading: parsed.heading, content: parsed.content } });
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr) || arr.length === 0) { removeValue('pozume.pendingShare'); return; }
+      const newest = arr[arr.length - 1];
+      const rest = arr.slice(0, -1);
+      if (rest.length > 0) saveValue('pozume.pendingShare', JSON.stringify(rest));
+      else removeValue('pozume.pendingShare');
+      if (newest && typeof newest.heading === 'string' && typeof newest.content === 'string') {
+        let initialAttachment: { uri: string; name?: string } | null = null;
+        if (typeof newest.imagePath === 'string' && newest.imagePath) {
+          const copied = exportSharedAttachment(newest.imagePath);
+          if (copied) initialAttachment = { uri: copied, name: newest.imagePath };
+        }
+        setRoute({ name: 'editor', note: null, prefill: { heading: newest.heading, content: newest.content }, initialAttachment });
       }
     } catch {}
   }, []);
@@ -136,9 +155,10 @@ function AppInner() {
   const createNote = useCallback(() => setRoute({ name: 'editor', note: null }), []);
   const createDrawing = useCallback(() => setRoute({ name: 'editor', note: null, drawing: true }), []);
   const closeEditor = useCallback(() => setRoute({ name: 'list' }), []);
-  // Nach jedem Speichern/Löschen: Listen und KI-Kontext aktualisieren
+  // Nach jedem Speichern/Löschen: Listen, KI-Kontext und Widget aktualisieren
   const onSaved = useCallback(() => {
     setDataVersion((v) => v + 1);
+    reloadWidget();
     client?.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
   }, [client]);
   const onDeleted = useCallback(() => {
@@ -237,6 +257,7 @@ function AppInner() {
               note={route.note}
               drawing={route.drawing}
               prefill={route.prefill}
+              initialAttachment={route.initialAttachment}
               allNotes={allNotes}
               onClose={closeEditor}
               onSaved={onSaved}
@@ -259,6 +280,7 @@ function AppInner() {
           note={route.note}
           drawing={route.drawing}
           prefill={route.prefill}
+          initialAttachment={route.initialAttachment}
           allNotes={allNotes}
           onClose={closeEditor}
           onSaved={onSaved}
@@ -358,11 +380,19 @@ function AppInner() {
         <SettingsScreen
           client={client}
           onLockChange={onLockToggle}
-          onLocaleChange={() => {}}
           // Logout: Client zurücksetzen, App-Group-Zugangsdaten und alle lokalen
           // Inhalte (Cache, Entwürfe, Offline-Queue) löschen — ein neues Konto
           // darf keine Daten des vorherigen sehen
-          onLoggedOut={() => { setClient(null); setRoute({ name: 'list' }); clearServerConfig(); clearAllLocalData(); }}
+          onLoggedOut={() => {
+            setClient(null);
+            setRoute({ name: 'list' });
+            clearServerConfig();
+            // Widget zeigt sonst bis zu 1 h alte Daten mit ungueltigen Zugangen
+            reloadWidget();
+            // Lokale Inhalte (Cache, Entwürfe, Offline-Queue) loeschen, erst
+            // danach darf ein neues Konto Daten schreiben — daher awaited
+            clearAllLocalData().catch(() => {});
+          }}
           onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}
         />

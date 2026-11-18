@@ -37,6 +37,8 @@ export interface QueuedWrite {
   body: { heading: string; content: string; tags: string };
   /** Version-Token der Server-Fassung, auf der die Änderung basiert */
   if_version?: string;
+  /** Notiz-Typ (Note.type, z.B. 'markdown') — wird beim Create an den Server durchgereicht */
+  noteType?: string;
   /** Fehlversuche (Netzwerk) — ab 1 wird vor Create-Wiederholung auf Duplikate geprüft */
   attempts?: number;
   queuedAt: number;
@@ -140,13 +142,31 @@ async function findExistingCreate(client: PoznoteClient, entry: QueuedWrite): Pr
 }
 
 /**
+ * In-Flight-Schutz: flushQueue wird sowohl beim App-Start als auch bei
+ * AppState-Wechseln aufgerufen — ohne Flag würden parallele Aufrufe
+ * dieselben Create-Einträge doppelt beim Server anlegen. Ein zweiter,
+ * parallel laufender Aufruf kehrt sofort leer zurück (ohne Warten).
+ */
+let flushing = false;
+
+export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
+  if (flushing) return { flushed: 0, failed: false, createdIds: [], conflicts: [] };
+  flushing = true;
+  try {
+    return await flushQueueInner(client);
+  } finally {
+    flushing = false;
+  }
+}
+
+/**
  * Queue abarbeiten (älteste zuerst). Bei erneutem Netzwerkfehler wird
  * abgebrochen — der Rest bleibt liegen und wartet auf den nächsten Versuch.
  * Erfolgreich verarbeitete Einträge werden entfernt; während des Flushs
  * neu dazugekommene Schreibvorgänge bleiben erhalten (identifiziert über
  * Key + Zeitstempel, nicht über die Uhrzeit des Flush-Starts).
  */
-export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
+async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
   const q = (await readAll()).sort((a, b) => a.queuedAt - b.queuedAt);
   if (q.length === 0) return { flushed: 0, failed: false, createdIds: [], conflicts: [] };
 
@@ -179,7 +199,8 @@ export async function flushQueue(client: PoznoteClient): Promise<FlushResult> {
         const res = await client.createNote({
           heading: entry.body.heading || 'Ohne Titel',
           content: entry.body.content,
-          type: 'note',
+          // Tatsächlichen Notiz-Typ durchreichen (Fallback 'note' für alte Einträge)
+          type: entry.noteType ?? 'note',
           tags: entry.body.tags,
         });
         createdIds.push(res.note.id);

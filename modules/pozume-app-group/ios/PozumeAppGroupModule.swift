@@ -1,6 +1,7 @@
 import ExpoModulesCore
 import Foundation
 import Security
+import WidgetKit
 
 /**
  * App-Group- und Keychain-Speicher für Widget und Share-Extension.
@@ -30,6 +31,11 @@ public class PozumeAppGroupModule: Module {
 
   /// Schlüssel, unter dem die aufgelöste Keychain-Group in der App Group liegt.
   private static let groupKey = "pozume.keychainGroup"
+
+  /// Validiert einen Dateinamen als einfachen Namen (keine '/', keine '..', nicht leer).
+  private static func isValidFileName(_ fileName: String) -> Bool {
+    !fileName.isEmpty && !fileName.contains("/") && !fileName.contains("..")
+  }
 
   /// UserDefaults der App Group; nil, falls die Gruppe nicht aktiviert ist.
   private var defaults: UserDefaults? {
@@ -81,6 +87,7 @@ public class PozumeAppGroupModule: Module {
   }
 
   /// Basis-Query für das Passwort-Item in der gemeinsamen Keychain.
+  /// kSecUseDataProtectionKeychain gilt für alle Zugriffe (Add/Update/Read/Delete).
   private func passwordQuery() -> [String: Any]? {
     guard let group = resolveAccessGroup() else { return nil }
     return [
@@ -88,6 +95,7 @@ public class PozumeAppGroupModule: Module {
       kSecAttrService as String: PozumeAppGroupModule.keychainService,
       kSecAttrAccount as String: PozumeAppGroupModule.keychainAccount,
       kSecAttrAccessGroup as String: group,
+      kSecUseDataProtectionKeychain as String: true,
     ]
   }
 
@@ -98,7 +106,6 @@ public class PozumeAppGroupModule: Module {
     let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
     if status == errSecItemNotFound {
       query[kSecValueData as String] = Data(value.utf8)
-      query[kSecUseDataProtectionKeychain as String] = true
       return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
     }
     return status == errSecSuccess
@@ -161,6 +168,42 @@ public class PozumeAppGroupModule: Module {
     /// Löscht das Server-Passwort aus der Keychain.
     Function("clearPassword") { () -> Bool in
       self.clearPassword()
+    }
+
+    /// Lädt alle Widget-Timelines neu (nach Login/Logout/Save aufrufen).
+    Function("reloadWidget") { () -> Bool in
+      do {
+        WidgetCenter.shared.reloadAllTimelines()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    /**
+     * Kopiert eine von der Share-Extension abgelegte Datei aus
+     * <appgroup-container>/SharedAttachments/ in das Cache-Verzeichnis der
+     * Haupt-App, damit JS/Expo (z.B. der Editor) darauf zugreifen kann.
+     * @returns absoluter Pfad der Kopie oder nil (ungültiger Name, Datei fehlt, Fehler).
+     */
+    Function("exportSharedAttachment") { (fileName: String) -> String? in
+      guard PozumeAppGroupModule.isValidFileName(fileName),
+            let groupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: PozumeAppGroupModule.suiteName),
+            let cachesUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        return nil
+      }
+      let sourceUrl = groupUrl.appendingPathComponent("SharedAttachments", isDirectory: true).appendingPathComponent(fileName)
+      let destinationUrl = cachesUrl.appendingPathComponent(fileName)
+      do {
+        // Alte Kopie entfernen, dann frisch kopieren
+        if FileManager.default.fileExists(atPath: destinationUrl.path) {
+          try FileManager.default.removeItem(at: destinationUrl)
+        }
+        try FileManager.default.copyItem(at: sourceUrl, to: destinationUrl)
+        return destinationUrl.path
+      } catch {
+        return nil
+      }
     }
   }
 }

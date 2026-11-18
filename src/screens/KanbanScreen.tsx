@@ -78,6 +78,9 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
 
   useEffect(() => { load(); }, [load]);
 
+  // Refs beim Unmount leeren — sonst halten sie Views einer abgebauten Board-Instanz fest
+  useEffect(() => () => { columnRefs.current = {}; }, []);
+
   // --- Drag&Drop ---
   const hoveredColumn = useMemo(() => {
     if (!drag || bounds.length === 0) return null;

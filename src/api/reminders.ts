@@ -28,13 +28,21 @@ async function writeAll(m: Map): Promise<void> {
 export async function setReminder(noteId: number, title: string, whenIso: string): Promise<void> {
   const { status } = await Notifications.requestPermissionsAsync();
   if (status !== 'granted') throw new Error('no-permission');
-  // Alte Notification der Notiz zuerst canceln, sonst feuern beide
-  await removeReminder(noteId);
+  const date = new Date(whenIso);
+  // Guard: Vergangene (oder ungültige) Zeitpunkte nicht schedeln —
+  // expo-notifications feuert sonst sofort.
+  if (isNaN(date.getTime()) || date.getTime() <= Date.now()) throw new Error('in-past');
+  // Erst die neue Notification schedulen, DANN die alte canceln: Schlägt das
+  // Schedulen fehl, bleibt die alte Erinnerung aktiv, statt dass beide weg sind.
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: { title: '🪶 Pozume', body: `Erinnerung: ${title}` },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(whenIso) } as any,
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date } as any,
   });
   const m = await readAll();
+  const oldId = m[noteId]?.notificationId;
+  if (oldId && oldId !== notificationId) {
+    await Notifications.cancelScheduledNotificationAsync(oldId).catch(() => {});
+  }
   m[noteId] = { when: whenIso, notificationId };
   await writeAll(m);
 }
@@ -47,9 +55,4 @@ export async function removeReminder(noteId: number): Promise<void> {
   }
   delete m[noteId];
   await writeAll(m);
-}
-
-export async function getReminder(noteId: number): Promise<string | null> {
-  const m = await readAll();
-  return m[noteId]?.when ?? null;
 }

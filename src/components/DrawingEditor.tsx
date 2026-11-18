@@ -328,7 +328,8 @@ interface Props {
 export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const { height: winH } = useWindowDimensions();
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState(COLORS[0]);
@@ -391,8 +392,19 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     });
   };
   const toLocal = (pageX: number, pageY: number) => {
+    // Fallback für den unwahrscheinlichen Fall, dass noch kein Messwert da ist
     if (!measuredOnce.current) measureCanvas();
     return toCanvas(pageX - canvasOrigin.current.x, pageY - canvasOrigin.current.y);
+  };
+
+  /** viewBox mitwachsen lassen, damit neue Elemente nicht abgeschnitten werden */
+  const growViewBox = (el: DrawEl) => {
+    const b = drawElBounds(el);
+    const [vw, vh] = viewBoxRef.current;
+    let nextW = vw, nextH = vh;
+    if (b.x1 > vw) nextW = Math.min(4000, Math.ceil(b.x1 / 100) * 100 + 100);
+    if (b.y1 > vh) nextH = Math.min(4000, Math.ceil(b.y1 / 100) * 100 + 100);
+    viewBoxRef.current = [nextW, nextH];
   };
 
   const startRef = useRef<{ x: number; y: number } | null>(null);
@@ -446,6 +458,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
       w: textWidth(text, TEXT_FONT_SIZE), h: TEXT_FONT_SIZE * 1.25,
       text, fontSize: TEXT_FONT_SIZE, color,
     });
+    growViewBox(elementsRef.current[elementsRef.current.length - 1]);
     dirtyRef.current = true;
     bump();
     commit();
@@ -489,13 +502,23 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     onPanResponderRelease: () => {
       if (tool === 'text') { startRef.current = null; return; }
       const preview = elementsRef.current.find((el) => el.id === 'preview');
+      let added: DrawEl | null = null;
       if (preview) {
         elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
         if (tool === 'pen' && penPointsRef.current.length > 1) {
-          elementsRef.current.push({ ...(preview as PathEl), id: nextId() });
+          added = { ...(preview as PathEl), id: nextId() };
         } else if (tool !== 'pen' && startRef.current) {
-          elementsRef.current.push({ ...preview, id: nextId() } as DrawEl);
+          added = { ...preview, id: nextId() } as DrawEl;
         }
+      } else if (tool === 'pen' && startRef.current) {
+        // Einzelner Stift-Tap ohne Bewegung: einen Punkt als kleinen Kreis zeichnen
+        const s = startRef.current;
+        const r = Math.max(2, width / 2);
+        added = { id: nextId(), type: 'ellipse', cx: s.x, cy: s.y, rx: r, ry: r, stroke: color, strokeWidth: 0, fill: color };
+      }
+      if (added) {
+        elementsRef.current.push(added);
+        growViewBox(added);
         dirtyRef.current = true;
         bump();
       }
@@ -547,7 +570,14 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           <Text style={styles.toolIcon}>🗑</Text>
         </TouchableOpacity>
       </View>
-      <View ref={canvasRef} style={[styles.canvas, { width: canvasW, height: canvasH }]} {...pan.panHandlers}>
+      {/* onLayout misst den Ursprung synchron nach dem Layout — vor dem ersten
+          Touch-Grant steht so immer ein Messwert bereit (measureInWindow ist async) */}
+      <View
+        ref={canvasRef}
+        onLayout={measureCanvas}
+        style={[styles.canvas, { width: canvasW, height: canvasH }]}
+        {...pan.panHandlers}
+      >
         <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`0 0 ${viewBoxRef.current[0]} ${viewBoxRef.current[1]}`}>
           <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={colors.surface} />
           {elementsRef.current.map((el) => renderDrawEl(el))}

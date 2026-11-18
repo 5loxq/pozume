@@ -32,16 +32,18 @@ export function onLocaleChange(fn: () => void): () => void {
 export function getLocale(): Locale {
   if (override === 'de' || override === 'en' || override === 'fr' || override === 'es') return override;
   // React Native hat kein `navigator`-Global; die Systemsprache steht nur nativ
-  // (aus den RN-Typen entfernt, zur Laufzeit aber vorhanden).
-  const tag = String((I18nManager as any).localeIdentifier || 'de').toLowerCase();
+  // (aus den RN-Typen entfernt, zur Laufzeit aber vorhanden). Defensiv parsen:
+  // Auf manchen Android-Versionen ist localeIdentifier undefined oder wirft.
+  let tag = '';
+  try {
+    const id = (I18nManager as any).localeIdentifier;
+    tag = typeof id === 'string' ? id.toLowerCase() : '';
+  } catch { tag = ''; }
+  if (!tag) return 'de'; // Android-Fallback Deutsch bleibt bewusst
   if (tag.startsWith('en')) return 'en';
   if (tag.startsWith('fr')) return 'fr';
   if (tag.startsWith('es')) return 'es';
   return 'de';
-}
-
-export function getLocaleMode(): LocaleMode {
-  return override ?? 'auto';
 }
 
 /** t(key, vars) oder t(key, locale, vars) — beide Signaturen erlaubt */

@@ -24,6 +24,20 @@
   [window makeKeyAndVisible];
   // RCTAppDelegate implements UIWindowSceneDelegate callbacks (frame/orientation changes)
   scene.delegate = appDelegate;
+  // Deep-Links beim Kaltstart: RN 0.76.5 hat keine Scene-Varianten von
+  // RCTLinkingManager — die URLContexts und UserActivities aus den
+  // connectionOptions werden an die klassischen Methoden weitergereicht.
+  for (UIOpenURLContext *context in connectionOptions.URLContexts) {
+    [RCTLinkingManager application:[UIApplication sharedApplication]
+                           openURL:context.URL
+                           options:@{}];
+  }
+  for (NSUserActivity *activity in connectionOptions.userActivities) {
+    [RCTLinkingManager application:[UIApplication sharedApplication]
+             continueUserActivity:activity
+               restorationHandler:^(NSArray<id<UIUserActivityRestoring>> * _Nullable restorableObjects) {
+               }];
+  }
 }
 
 @end
@@ -68,6 +82,28 @@
 // Linking API
 - (BOOL)application:(UIApplication *)application openURL:(NSURL *)url options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options {
   return [super application:application openURL:url options:options] || [RCTLinkingManager application:application openURL:url options:options];
+}
+
+// Deep-Links im Scene-Lifecycle (Widget-Tap, pozume://-Links): dieser Delegate
+// ist zur Laufzeit auch der scene.delegate (siehe SceneDelegate oben). RN 0.76.5
+// stellt keine Scene-Varianten von RCTLinkingManager bereit — die URLs werden
+// an die klassische openURL:-Methode weitergereicht.
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts
+{
+  for (UIOpenURLContext *context in URLContexts) {
+    [RCTLinkingManager application:[UIApplication sharedApplication]
+                           openURL:context.URL
+                           options:@{}];
+  }
+}
+
+// Universal Links im Scene-Lifecycle (analog openURLContexts).
+- (void)scene:(UIScene *)scene continueUserActivity:(nonnull NSUserActivity *)userActivity
+{
+  [RCTLinkingManager application:[UIApplication sharedApplication]
+          continueUserActivity:userActivity
+            restorationHandler:^(NSArray<id<UIUserActivityRestoring>> * _Nullable restorableObjects) {
+            }];
 }
 
 // Universal Links

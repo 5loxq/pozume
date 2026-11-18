@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { usePalette, spacing, radius, typeFor, shadow,
   Palette, saveThemeOverride, getThemeMode, type ThemeMode,
 } from '../theme';
-import { t, Locale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
+import { t, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer, getAppLock } from '../api/store';
 import { queueSize } from '../api/offlineQueue';
@@ -20,13 +20,12 @@ import { readCrashLog, clearCrashLog, type CrashEntry } from '../api/crashLog';
 interface Props {
   client: PoznoteClient;
   onLockChange: (enabled: boolean) => void;
-  onLocaleChange: (locale: Locale | 'auto') => void;
   onLoggedOut: () => void;
   onOpenArchive: () => void;
   onBack: () => void;
 }
 
-export default function SettingsScreen({ client, onLockChange, onLocaleChange, onLoggedOut, onOpenArchive, onBack }: Props) {
+export default function SettingsScreen({ client, onLockChange, onLoggedOut, onOpenArchive, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
@@ -59,13 +58,18 @@ export default function SettingsScreen({ client, onLockChange, onLocaleChange, o
   const setLang = async (mode: LocaleMode) => {
     setLocaleMode(mode);
     await saveLocaleOverride(mode);
-    onLocaleChange(mode);
   };
 
   const toggleLock = async (v: boolean) => {
     setLockEnabled(v);
-    await setAppLock(v);
-    onLockChange(v);
+    try {
+      await setAppLock(v);
+      onLockChange(v);
+    } catch (e: any) {
+      // Speichern fehlgeschlagen — Switch in den tatsächlichen Zustand zurückstellen
+      setLockEnabled(!v);
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
   };
 
   const confirmLogout = async () => {

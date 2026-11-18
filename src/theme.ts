@@ -88,9 +88,6 @@ export function typeFor(p: Palette) {
   };
 }
 
-/** Light-Variante als Fallback (z.B. Boot-Screen vor dem ersten Render mit Palette) */
-export const type = typeFor(light);
-
 export const shadow = Platform.select({
   ios: { shadowColor: '#1a2340', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
   android: { elevation: 3 },
@@ -101,13 +98,29 @@ export const shadowSoft = Platform.select({
   android: { elevation: 1 },
 });
 
-export const primaryButton = {
-  backgroundColor: colors.primary,
-  borderRadius: radius.pill,
-  paddingVertical: 16,
-  alignItems: 'center' as const,
-  justifyContent: 'center' as const,
-};
+/**
+ * Palette-abhängige Primär-Button-Styles: Dark nutzt die Dark-Primary
+ * (#818cf8) statt der Light-Primary. Zur Laufzeit mit der aktuellen
+ * Palette aufrufen, z.B. primaryButtonFor(usePalette()).
+ */
+export function primaryButtonFor(p: Palette) {
+  return {
+    backgroundColor: p.primary,
+    borderRadius: radius.pill,
+    paddingVertical: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  };
+}
+
+/**
+ * Light-Fallback für statische StyleSheet-Definitionen (Modul-Ladezeit,
+ * vor dem ersten Palette-Wechsel) — bleibt als Objekt exportiert, damit
+ * bestehende Nutzungen (Spread in StyleSheet.create, direkte style-Übergabe)
+ * kompatibel bleiben. Palette-abhängige Aufrufer sollten primaryButtonFor
+ * mit ihrer Palette verwenden.
+ */
+export const primaryButton = primaryButtonFor(light);
 
 export const greetingForHour = (hour: number, locale = 'de'): string => {
   if (locale === 'de') {

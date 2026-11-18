@@ -44,7 +44,7 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       setError(msg.includes('network') || msg.includes('Network request failed')
-        ? 'Server nicht erreichbar — Adresse und Verbindung prüfen.'
+        ? t('login.unreachable')
         : msg);
     } finally {
       setBusy(false);

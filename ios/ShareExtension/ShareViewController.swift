@@ -2,11 +2,13 @@ import UIKit
 import UniformTypeIdentifiers
 
 /**
- * Share-Extension: empfängt eine URL oder Text aus dem Teilen-Menü
- * (z.B. Safari) und legt ihn in der App Group als "ausstehenden Share" ab.
- * Die Haupt-App übernimmt ihn beim nächsten Start und öffnet den Editor mit
- * Vorbelegung — Zielordner und Tags werden dort vor dem Speichern gewählt
- * (P1-12). Die Extension selbst braucht dafür keine Zugangsdaten mehr.
+ * Share-Extension: empfängt eine URL, Text oder ein Bild aus dem Teilen-Menü
+ * (z.B. Safari, Fotos) und legt ihn in der App Group als "ausstehenden Share"
+ * ab — als Queue (JSON-Array, max. 20 Einträge), damit mehrere Shares hintere-
+ *inander nicht verloren gehen. Die Haupt-App übernimmt die Einträge beim
+ * nächsten Start und öffnet den Editor mit Vorbelegung — Zielordner und Tags
+ * werden dort vor dem Speichern gewählt (P1-12). Die Extension selbst braucht
+ * dafür keine Zugangsdaten mehr.
  */
 class ShareViewController: UIViewController {
 
@@ -19,6 +21,8 @@ class ShareViewController: UIViewController {
   private var sharedText: String = ""
   private var sharedUrl: String = ""
   private var sharedTitle: String = ""
+  /// Dateiname (ohne Verzeichnis) eines geteilten Bildes in SharedAttachments/.
+  private var sharedImagePath: String = ""
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -32,18 +36,34 @@ class ShareViewController: UIViewController {
   /**
    * Liest die geteilten Elemente aus dem Extension-Context.
    * Safari liefert URLs teils als UTType.url, teils als Property-List
-   * (mit Titel), Text-Apps als PlainText — alle drei Varianten werden
-   * der Reihe nach probiert.
+   * (mit Titel), Text-Apps als PlainText, Fotos als Image — alle vier
+   * Varianten werden der Reihe nach probiert. loadItem kann die Daten
+   * je nach Quelle als URL/String, aber auch als NSData liefern — die
+   * Completion-Handler haben dafür Fallbacks; Fehler werden geloggt und
+   * ignoriert, damit die Extension trotzdem weiterläuft.
    */
   private func loadSharedItem() {
     guard let items = extensionContext?.inputItems as? [NSExtensionItem] else { return }
     for item in items {
       guard let providers = item.attachments else { continue }
       for provider in providers {
-        // Variante 1: direkte URL (z.B. aus Fotos, Bookmark-Apps)
+        // Variante 1: direkte URL (z.B. aus Bookmark-Apps)
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-          provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, _ in
-            if let url = data as? URL {
+          provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { data, error in
+            if let error = error {
+              print("[ShareExtension] URL laden fehlgeschlagen: \(error.localizedDescription)")
+              return
+            }
+            // Fallback: manche Quellen liefern die URL als NSData
+            let url: URL?
+            if let direct = data as? URL {
+              url = direct
+            } else if let nsData = data as? NSData {
+              url = URL(dataRepresentation: nsData as Data, relativeTo: nil)
+            } else {
+              url = nil
+            }
+            if let url = url {
               self.sharedUrl = url.absoluteString
               self.sharedTitle = item.attributedTitle?.string ?? ""
               DispatchQueue.main.async { self.updatePreview() }
@@ -52,8 +72,21 @@ class ShareViewController: UIViewController {
         }
         // Variante 2: einfacher Text (z.B. aus Notiz-Apps, Copy-Paste)
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
-          provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { data, _ in
-            if let text = data as? String {
+          provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { data, error in
+            if let error = error {
+              print("[ShareExtension] Text laden fehlgeschlagen: \(error.localizedDescription)")
+              return
+            }
+            // Fallback: Text kann auch als NSData (UTF-8) ankommen
+            let text: String?
+            if let direct = data as? String {
+              text = direct
+            } else if let nsData = data as? NSData {
+              text = String(data: nsData as Data, encoding: .utf8)
+            } else {
+              text = nil
+            }
+            if let text = text {
               self.sharedText = text
               if self.sharedTitle.isEmpty { self.sharedTitle = item.attributedTitle?.string ?? "" }
               DispatchQueue.main.async { self.updatePreview() }
@@ -62,8 +95,22 @@ class ShareViewController: UIViewController {
         }
         // Variante 3: Safari liefert die URL als Property-List (kompakter Titel + URL)
         if provider.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier) {
-          provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier, options: nil) { data, _ in
-            if let dict = data as? [String: Any],
+          provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier, options: nil) { data, error in
+            if let error = error {
+              print("[ShareExtension] Property-List laden fehlgeschlagen: \(error.localizedDescription)")
+              return
+            }
+            // Fallback: Property-List kann auch als NSData ankommen
+            let dict: [String: Any]?
+            if let direct = data as? [String: Any] {
+              dict = direct
+            } else if let nsData = data as? NSData,
+                      let parsed = try? PropertyListSerialization.propertyList(from: nsData as Data, options: [], format: nil) as? [String: Any] {
+              dict = parsed
+            } else {
+              dict = nil
+            }
+            if let dict = dict,
                let url = (dict[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any])?["URL"] as? String {
               self.sharedUrl = url
               if let title = (dict[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any])?["title"] as? String {
@@ -73,14 +120,76 @@ class ShareViewController: UIViewController {
             }
           }
         }
+        // Variante 4: Bild (z.B. aus Fotos) — wird als Datei in SharedAttachments/ abgelegt
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+          provider.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil) { data, error in
+            if let error = error {
+              print("[ShareExtension] Bild laden fehlgeschlagen: \(error.localizedDescription)")
+              return
+            }
+            // Bilddaten kommen je nach Quelle als NSData oder als Datei-NSURL
+            let imageData: Data?
+            if let nsData = data as? NSData {
+              imageData = nsData as Data
+            } else if let url = data as? URL {
+              imageData = try? Data(contentsOf: url)
+            } else {
+              imageData = nil
+            }
+            guard let imageData = imageData,
+                  let fileName = self.saveImage(imageData, provider: provider) else { return }
+            self.sharedImagePath = fileName
+            DispatchQueue.main.async { self.updatePreview() }
+          }
+        }
       }
     }
   }
 
-  /** Vorschau-Label mit Titel, URL und Text des geteilten Inhalts aktualisieren. */
+  // MARK: - Bild in der App Group ablegen
+
+  /**
+   * Speichert die Bilddaten unter <appgroup-container>/SharedAttachments/
+   * mit UUID-Namen und passender Endung; legt das Verzeichnis bei Bedarf an.
+   * @returns Dateiname (ohne Verzeichnis) oder nil bei Fehler.
+   */
+  private func saveImage(_ data: Data, provider: NSItemProvider) -> String? {
+    guard let groupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.de.inthielligent.pozume") else {
+      return nil
+    }
+    let dir = groupUrl.appendingPathComponent("SharedAttachments", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      let fileName = UUID().uuidString + "." + Self.imageExtension(for: data, provider: provider)
+      try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+      return fileName
+    } catch {
+      print("[ShareExtension] Bild speichern fehlgeschlagen: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
+  /** Bild-Endung anhand der registrierten Typen, mit Magic-Bytes-Fallback. */
+  private static func imageExtension(for data: Data, provider: NSItemProvider) -> String {
+    let registered = provider.registeredTypeIdentifiers
+    if registered.contains(UTType.heic.identifier) { return "heic" }
+    if registered.contains(UTType.png.identifier) { return "png" }
+    if registered.contains(UTType.jpeg.identifier) { return "jpg" }
+    // Magic Bytes als Fallback, wenn die Typen nichts aussagen
+    if data.count > 12 {
+      if data[data.startIndex] == 0xFF, data[data.startIndex + 1] == 0xD8 { return "jpg" }
+      if data[data.startIndex] == 0x89, data[data.startIndex + 1] == 0x50 { return "png" }
+      if String(data: data.subdata(in: 4..<8), encoding: .ascii) == "ftyp" { return "heic" }
+    }
+    return "jpg"
+  }
+
+  /** Vorschau-Label mit Titel, URL, Text und Bild-Hinweis des geteilten Inhalts aktualisieren. */
   private func updatePreview() {
     let heading = sharedTitle.isEmpty ? "Geteilt" : sharedTitle
-    previewLabel.text = [heading, sharedUrl, sharedText].filter { !$0.isEmpty }.joined(separator: "\n")
+    var lines = [heading, sharedUrl, sharedText].filter { !$0.isEmpty }
+    if !sharedImagePath.isEmpty { lines.append("📷 Bild angehängt") }
+    previewLabel.text = lines.joined(separator: "\n")
   }
 
   // MARK: - UI
@@ -148,39 +257,80 @@ class ShareViewController: UIViewController {
   /**
    * Speichern-Button: baut aus Titel/URL/Text die Markdown-Vorbelegung
    * (Überschrift = Seitentitel oder URL, Inhalt = Link + Text) und legt sie
-   * als "ausstehenden Share" in der App Group ab. Die Haupt-App übernimmt den
-   * Eintrag beim nächsten Start, zeigt den Editor mit Vorbelegung und lässt
-   * Zielordner und Tags vor dem Speichern wählen. Der Eintrag wird von der
-   * App sofort beim Übernehmen entnommen — der Inhalt landet genau einmal.
+   * als "ausstehenden Share" in der App Group ab — als Eintrag in einer
+   * Queue (JSON-Array unter "pozume.pendingShare", max. 20 Einträge, die
+   * ältesten werden verworfen). Die Haupt-App übernimmt die Einträge beim
+   * nächsten Start, zeigt den Editor mit Vorbelegung und lässt Zielordner
+   * und Tags vor dem Speichern wählen.
    */
   @objc private func saveTapped() {
     // Überschrift: Seitentitel, sonst URL-Anfang, sonst Fallback
-    let heading = sharedTitle.isEmpty ? (sharedUrl.isEmpty ? "Geteilte Notiz" : String(sharedUrl.prefix(60))) : sharedTitle
+    let heading = sharedTitle.isEmpty
+      ? (sharedUrl.isEmpty ? (sharedImagePath.isEmpty ? "Geteilte Notiz" : "Geteiltes Bild") : String(sharedUrl.prefix(60)))
+      : sharedTitle
     // Inhalt: URL als Markdown-Link, darunter der geteilte Text
     var content = ""
     if !sharedUrl.isEmpty {
-      content += "[\(sharedUrl)](\(sharedUrl))\n\n"
+      // Klammern escapen, damit Titel/URL die Markdown-Link-Syntax nicht vorzeitig schließen
+      let escapedUrl = Self.escapeMarkdown(sharedUrl)
+      content += "[\(escapedUrl)](\(escapedUrl))\n\n"
     }
     if !sharedText.isEmpty {
       content += sharedText
     }
-    if content.isEmpty {
+    if content.isEmpty && sharedImagePath.isEmpty {
       statusLabel.text = "Nichts zu übernehmen."
       return
     }
 
-    let payload: [String: String] = ["heading": heading, "content": content]
-    guard let data = try? JSONSerialization.data(withJSONObject: payload),
-          let raw = String(data: data, encoding: .utf8),
-          let group = UserDefaults(suiteName: "group.de.inthielligent.pozume") else {
+    // Neuer Queue-Eintrag: ts (Unix-Sekunden), heading, content, imagePath nur bei Bild
+    var entry: [String: Any] = [
+      "ts": Int(Date().timeIntervalSince1970),
+      "heading": heading,
+      "content": content,
+    ]
+    if !sharedImagePath.isEmpty {
+      entry["imagePath"] = sharedImagePath
+    }
+
+    guard let group = UserDefaults(suiteName: "group.de.inthielligent.pozume") else {
+      statusLabel.text = "Speichern nicht möglich."
+      return
+    }
+    // Vorhandene Queue lesen (altes Einzel-Format ignorieren), neuen Eintrag anhängen
+    var queue: [[String: Any]] = []
+    if let raw = group.string(forKey: "pozume.pendingShare"),
+       let data = raw.data(using: .utf8),
+       let existing = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+      queue = existing
+    }
+    queue.append(entry)
+    // Max. 20 Einträge — die ältesten (vorne) verwerfen
+    if queue.count > 20 {
+      queue.removeFirst(queue.count - 20)
+    }
+    guard let data = try? JSONSerialization.data(withJSONObject: queue),
+          let raw = String(data: data, encoding: .utf8) else {
       statusLabel.text = "Speichern nicht möglich."
       return
     }
     group.set(raw, forKey: "pozume.pendingShare")
+    // synchronize() macht den Eintrag sofort für die Haupt-App sichtbar
+    // (gleiche Konvention wie PozumeAppGroupModule.saveValue).
+    group.synchronize()
 
     statusLabel.text = "✓ Übernommen — in der Pozume-App fertigstellen"
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
       self.extensionContext?.completeRequest(returningItems: nil)
     }
+  }
+
+  /** Escapt Backslash sowie eckige und runde Klammern für die Markdown-Link-Syntax. */
+  private static func escapeMarkdown(_ s: String) -> String {
+    s.replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "[", with: "\\[")
+      .replacingOccurrences(of: "]", with: "\\]")
+      .replacingOccurrences(of: "(", with: "\\(")
+      .replacingOccurrences(of: ")", with: "\\)")
   }
 }

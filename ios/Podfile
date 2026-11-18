@@ -52,7 +52,7 @@ target 'Pozume' do
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
 
-    # Xcode 27 requires deployment target >= 15.0; some pods default to 9.0
+    # Xcode 26 requires deployment target >= 15.0; some pods default to 9.0
     installer.pods_project.targets.each do |t|
       t.build_configurations.each do |config|
         if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.1

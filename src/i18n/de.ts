@@ -314,5 +314,16 @@ export const de = {
   'settings.logoutQueuedText': 'Es warten {n} offline gespeicherte Änderung(en) auf Synchronisierung — sie werden beim Abmelden vom Gerät gelöscht. Jetzt abmelden?',
   'offline.conflictTitle': 'Konflikt bei Synchronisierung',
   'offline.conflictText': '{n} Notiz(en) wurde(n) auf dem Server zwischenzeitlich geändert. Die offline bearbeitete Fassung liegt bereit und kann in der Notiz wiederhergestellt werden.',
+  'list.shareConfirmTitle': 'Notiz öffentlich teilen?',
+  'list.shareConfirmText': 'Es wird ein Link erstellt, über den jeder die Notiz lesen kann — ohne Anmeldung. Der Link kann jederzeit zurückgezogen werden.',
+  'list.shareCreate': 'Link erstellen',
+  'lock.promptMessage': 'Pozume entsperren',
+  'lock.noDeviceSecurity': 'Auf diesem Gerät ist weder ein Code noch Biometrie eingerichtet. Ohne Gerätesperre kann die App nicht geschützt werden — Entsperren erfolgt per Tipp.',
+  'lock.tapUnlock': 'Ohne Schutz öffnen',
+  'lock.pinHint': '4–8 Ziffern',
+  'lock.tooManyAttempts': 'Zu viele Versuche — in {n} s erneut versuchen',
+  'login.unreachable': 'Server nicht erreichbar — Adresse und Verbindung prüfen.',
+  'tasks.defaultListName': 'Aufgaben',
+  'tasks.toggleFailed': 'Änderung fehlgeschlagen — Liste neu geladen',
 } as const;
 export type TranslationKey = keyof typeof de;

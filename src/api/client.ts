@@ -98,12 +98,16 @@ export interface NoteLockInfo {
 
 export class PoznoteError extends Error {
   status: number;
+  /** true = absichtlich abgebrochen (AbortSignal, z.B. veraltete Suche) —
+   *  unterscheidet Abbruch von echten Netzwerkfehlern (beide haben status 0) */
+  aborted: boolean;
   /** Geparpte Fehler-Antwort des Servers (z.B. {code, current} bei 409 version_conflict) */
   data?: any;
-  constructor(status: number, message: string, data?: any) {
+  constructor(status: number, message: string, data?: any, aborted = false) {
     super(message);
     this.status = status;
     this.data = data;
+    this.aborted = aborted;
   }
 }
 
@@ -197,7 +201,7 @@ export class PoznoteClient {
         },
       });
     } catch (e) {
-      if (outerSignal?.aborted) throw new PoznoteError(0, 'aborted');
+      if (outerSignal?.aborted) throw new PoznoteError(0, 'aborted', undefined, true);
       if (attempt < 1) {
         clearTimeout(timer);
         await new Promise((r) => setTimeout(r, 400));
@@ -221,6 +225,28 @@ export class PoznoteClient {
     }
     this.assertSameOrigin(res);
     return res.json() as Promise<T>;
+  }
+
+  /**
+   * Roher fetch mit Timeout — gleiche 12s-Konvention wie req(), für Aufrufe
+   * außerhalb von req() (Export-Endpunkte, Attachments mit FormData/Binärdaten).
+   * Abbruch über ein äußeres Signal wird wie in req() als 'aborted' (nicht als
+   * 'offline'/Netzwerkfehler) gemeldet, damit Aufrufer beides unterscheiden können.
+   */
+  private async fetchWithTimeout(url: string, init: RequestInit = {}, outerSignal?: AbortSignal): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const onOuterAbort = () => controller.abort();
+    outerSignal?.addEventListener('abort', onOuterAbort);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (e) {
+      if (outerSignal?.aborted) throw new PoznoteError(0, 'aborted', undefined, true);
+      throw new PoznoteError(0, 'network');
+    } finally {
+      clearTimeout(timer);
+      outerSignal?.removeEventListener('abort', onOuterAbort);
+    }
   }
 
   // --- Notes ---
@@ -500,7 +526,7 @@ export class PoznoteClient {
   // --- Export (Legacy-Endpunkte außerhalb /api/v1) ---
   /** Einzelne Notiz exportieren (format: markdown | html | json) */
   async exportNote(id: number, format: 'markdown' | 'html' | 'json'): Promise<string> {
-    const res = await fetch(`${this.cfg.baseUrl}/api_export_note.php?id=${id}&format=${format}&disposition=inline`, {
+    const res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/api_export_note.php?id=${id}&format=${format}&disposition=inline`, {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
@@ -511,7 +537,7 @@ export class PoznoteClient {
   /** Serverseitigen ZIP-Export herunterladen (alle Notizen oder alle Anhänge) */
   async downloadExport(kind: 'entries' | 'attachments'): Promise<Uint8Array> {
     const path = kind === 'entries' ? 'api_export_entries.php' : 'api_export_attachments.php';
-    const res = await fetch(`${this.cfg.baseUrl}/${path}`, {
+    const res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/${path}`, {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
@@ -550,7 +576,7 @@ export class PoznoteClient {
       name: file.name,
       type: file.mimeType || 'application/octet-stream',
     } as any);
-    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments`, {
+    const res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments`, {
       method: 'POST',
       headers: this.authHeaders(),
       body: form,
@@ -569,7 +595,7 @@ export class PoznoteClient {
 
   /** Anhang als Text roh laden (z.B. SVG-Zeichnungen) */
   async getAttachmentText(noteId: number, attachmentId: string): Promise<string> {
-    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
+    const res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);
@@ -579,7 +605,7 @@ export class PoznoteClient {
 
   /** Anhang als Bytes laden (für Teilen/Speichern) */
   async getAttachmentBytes(noteId: number, attachmentId: string): Promise<Uint8Array> {
-    const res = await fetch(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
+    const res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/api/v1/notes/${noteId}/attachments/${attachmentId}`, {
       headers: this.authHeaders(),
     });
     if (!res.ok) throw new PoznoteError(res.status, `HTTP ${res.status}`);

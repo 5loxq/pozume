@@ -4,8 +4,14 @@ export function formatRelativeDate(iso?: string, locale = 'de'): string {
   if (isNaN(d.getTime())) return '';
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  if (diffMs < 0) {
+    // Zukunft: >= 1 Minute -> "in X Minuten", < 1 Minute -> "gerade eben"
+    const futureMin = Math.floor(-diffMs / 60000);
+    if (futureMin >= 1) return rtf.format(futureMin, 'minute');
+    return locale === 'de' ? 'gerade eben' : 'just now';
+  }
+  const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return locale === 'de' ? 'gerade eben' : 'just now';
   if (diffMin < 60) return rtf.format(-diffMin, 'minute');
   const diffH = Math.floor(diffMin / 60);
@@ -35,7 +41,9 @@ export function excerpt(content?: string, max = 120): string {
   if (!content) return '';
   const text = content
     .replace(/<[^>]+>/g, ' ')
-    .replace(/[#*_`>\-\[\]()!]/g, ' ')
+    // Bindestriche bleiben erhalten (z.B. "E-Mail"); Klammern und
+    // Ausrufezeichen werden weiterhin entfernt
+    .replace(/[#*_`>\[\]()!]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > max ? text.slice(0, max).trimEnd() + '…' : text;

@@ -21,6 +21,8 @@ type PozumeAppGroupModule = {
   savePassword(value: string): boolean;
   readPassword(): string | null;
   clearPassword(): boolean;
+  reloadWidget(): boolean;
+  exportSharedAttachment(fileName: string): string | null;
 };
 
 let nativeModule: PozumeAppGroupModule | null = null;
@@ -103,14 +105,44 @@ export function clearPassword(): boolean {
 }
 
 /**
+ * Lädt alle Widget-Timelines neu — nach Login/Logout/Save aufrufen,
+ * damit das Widget die neuen Daten sofort zieht.
+ * @returns true bei Erfolg, false wenn das native Modul fehlt oder der Aufruf scheitert.
+ */
+export function reloadWidget(): boolean {
+  try {
+    return mod()?.reloadWidget() ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Kopiert eine von der Share-Extension unter SharedAttachments/ abgelegte
+ * Datei in das Cache-Verzeichnis der Haupt-App und gibt den absoluten Pfad
+ * der Kopie zurück (z.B. als initialAttachment für den Editor).
+ * @returns absoluter Pfad oder null (ungültiger Name, Datei fehlt, Fehler).
+ */
+export function exportSharedAttachment(fileName: string): string | null {
+  try {
+    return mod()?.exportSharedAttachment(fileName) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Server-Zugangsdaten für Widget und Share-Extension verteilen:
- * baseUrl + Benutzername gehen als JSON in die App Group (unkritisch),
- * das Passwort in die verschlüsselte gemeinsame Keychain.
+ * baseUrl + Benutzername + userId gehen als JSON in die App Group
+ * (unkritisch), das Passwort in die verschlüsselte gemeinsame Keychain.
  * Wird beim Login/Boot der Haupt-App aufgerufen.
  * @returns true, wenn beide Schreibvorgänge erfolgreich waren.
  */
-export function saveServerConfig(cfg: { baseUrl: string; username: string; password: string }): boolean {
-  const groupOk = saveValue(SERVER_CONFIG_KEY, JSON.stringify({ baseUrl: cfg.baseUrl, username: cfg.username }));
+export function saveServerConfig(cfg: { baseUrl: string; username: string; password: string; userId?: string | number }): boolean {
+  // userId nur schreiben, wenn vorhanden (im JSON als String); sonst Feld weglassen
+  const payload: Record<string, string> = { baseUrl: cfg.baseUrl, username: cfg.username };
+  if (cfg.userId != null) payload.userId = String(cfg.userId);
+  const groupOk = saveValue(SERVER_CONFIG_KEY, JSON.stringify(payload));
   const keychainOk = savePassword(cfg.password);
   return groupOk && keychainOk;
 }

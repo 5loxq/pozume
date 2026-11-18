@@ -14,7 +14,7 @@ import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite, takeCreatedId } from '../api/offlineQueue';
 import { saveDraft, readDraft, clearDraft, type Draft } from '../api/drafts';
 import { getOfflineAttachment, downloadAttachmentOffline, removeOfflineAttachment } from '../api/attachmentStore';
-import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin } from '../api/noteLock';
+import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin, pinRetryDelay } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
 import PromptModal from '../components/PromptModal';
@@ -32,6 +32,8 @@ interface Props {
   drawing?: boolean;          // true = neue Notiz startet als Zeichnung
   /** Vorbelegung für neue Notizen (z.B. aus dem Teilen-Menü übernommen) */
   prefill?: { heading: string; content: string } | null;
+  /** Datei, die nach dem ersten erfolgreichen Speichern als Anhang hochgeladen wird */
+  initialAttachment?: { uri: string; name?: string } | null;
   /** Alle Notizen (für Notizlinks und Link-Auswahl) */
   allNotes?: Note[];
   onClose: () => void;
@@ -50,7 +52,7 @@ const NOTE_COLORS = ['#3b82f6', '#16a34a', '#dc2626', '#f59e0b', '#7c3aed', '#db
  *  wird schreibgeschützt geöffnet — ein ungeeigneter Editor würde die Formatierung beschädigen. */
 const EDITABLE_TYPES = new Set(['markdown', 'note', 'excalidraw']);
 
-export default function NoteEditorScreen({ client, note, drawing, prefill, allNotes, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
+export default function NoteEditorScreen({ client, note, drawing, prefill, initialAttachment, allNotes, onClose, onSaved, onDeleted, onOpenNote, onOpenVersions }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
@@ -100,8 +102,27 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   // Notizlink-Auswahl (P2-16: [[Notiztitel]] einfügen)
   const [showLinkPicker, setShowLinkPicker] = useState(false);
+  // Initialer Anhang (z.B. aus dem Teilen-Menü): nach dem ersten erfolgreichen
+  // persist hochladen und danach lokal verbrauchen — Fehler werden still übersprungen
+  const initialAttachmentRef = useRef(initialAttachment ?? null);
+  const uploadInitialAttachment = async () => {
+    const file = initialAttachmentRef.current;
+    if (!file || noteIdRef.current == null) return;
+    // Vor dem Hochladen verbrauchen — ein erneuter persist lädt nicht nochmal
+    initialAttachmentRef.current = null;
+    try {
+      await client.uploadAttachment(noteIdRef.current, { uri: file.uri, name: file.name ?? 'anhang' });
+      const atts = await client.listAttachments(noteIdRef.current);
+      setAttachments(atts.attachments ?? []);
+    } catch { /* still überspringen — der Editor darf nicht blockieren */ }
+  };
 
+  // In-Flight-Guard: überlappende persist()-Aufrufe (Autosave-Timer + Unmount-
+  // Cleanup) würden sonst bei neuen Notizen dieselbe Notiz doppelt anlegen
+  const persistingRef = useRef(false);
   const persist = async (opts: { ignoreVersion?: boolean } = {}) => {
+    if (persistingRef.current) return;
+    persistingRef.current = true;
     setSaveState('saving');
     const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
     const queueKey = noteIdRef.current != null ? `note-${noteIdRef.current}` : localQueueKey;
@@ -144,6 +165,8 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
       clearDraft(localQueueKey).catch(() => {});
       if (noteIdRef.current != null) clearDraft(`note-${noteIdRef.current}`).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Notiz existiert jetzt — initialen Anhang nachziehen (still bei Fehler)
+      uploadInitialAttachment();
     } catch (e: any) {
       if (e?.status === 0) {
         // Offline: Schreibvorgang dauerhaft einreihen — kein Datenverlust bei App-Kill.
@@ -154,6 +177,9 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
           noteId: noteIdRef.current ?? undefined,
           body,
           if_version: versionRef.current,
+          // Typ wie beim Online-Create mitliefern — sonst legt der Queue-Flush
+          // Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an
+          ...(noteIdRef.current == null ? { noteType: isDrawingContent(body.content) ? 'note' : 'markdown' } : {}),
         }).catch(() => {});
         setSaveState('queued');
         return;
@@ -166,6 +192,8 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
       setSaveState('failed');
       const msg = e?.message ?? String(e);
       Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
+    } finally {
+      persistingRef.current = false;
     }
   };
 
@@ -251,7 +279,9 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => { draftTimer.current = null; saveDraftNow(); }, 400);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(persist, 1200);
+    // Timer-Ref im Callback nullen — sonst hält der Unmount-Cleanup einen
+    // bereits gefeuerten Timer für aktiv und speichert doppelt
+    saveTimer.current = setTimeout(() => { saveTimer.current = null; persist(); }, 1200);
   };
 
   // --- Server-Edit-Lock: sichtbar machen, wer die Notiz offen hat ---
@@ -308,6 +338,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
     }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
+      saveTimer.current = null;
       persistRef.current();
     }
   }, []);
@@ -531,28 +562,36 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
   };
 
   const tryUnlock = async () => {
-    if (await verifyPin(pinInput)) {
+    // noteId mitgeben, damit das Rate-Limit je Notiz greift
+    if (await verifyPin(pinInput, noteId ?? undefined)) {
       setLocked(false); setPinPrompt(false); setPinInput('');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       setPinInput('');
+      // Aktives Rate-Limit kurz sichtbar melden (nur wenn noch Sekunden übrig sind)
+      const delay = await pinRetryDelay(noteId ?? undefined).catch(() => 0);
+      if (delay > 0) Alert.alert(t('common.error'), t('lock.tooManyAttempts', { n: delay }));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
   const toggleNoteLock = async () => {
     if (noteId == null) return;
-    if (await isNoteLocked(noteId)) {
-      await unlockNoteRecord(noteId);
-      Alert.alert('🪶', t('lock.unlockNote'));
-    } else {
-      if (!(await hasPin())) {
-        setPromptValue('');
-        setPromptKind('pin');
+    try {
+      if (await isNoteLocked(noteId)) {
+        await unlockNoteRecord(noteId);
+        Alert.alert('🪶', t('lock.unlockNote'));
       } else {
-        await lockNote(noteId);
-        Alert.alert('🔒', t('lock.noteLock'));
+        if (!(await hasPin())) {
+          setPromptValue('');
+          setPromptKind('pin');
+        } else {
+          await lockNote(noteId);
+          Alert.alert('🔒', t('lock.noteLock'));
+        }
       }
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
     }
   };
 
@@ -560,13 +599,17 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
     if (noteId == null) { setPromptKind(null); return; }
     if (!pin || !/^\d{4,8}$/.test(pin)) {
       // Modal offen lassen und Feedback geben statt still zu schließen
-      Alert.alert(t('common.error'), t('lock.enterPass') + ': 4–8 Ziffern');
+      Alert.alert(t('common.error'), `${t('lock.enterPass')}: ${t('lock.pinHint')}`);
       return;
     }
     setPromptKind(null);
-    await setPin(pin);
-    await lockNote(noteId);
-    Alert.alert('🔒', t('lock.noteLock'));
+    try {
+      await setPin(pin);
+      await lockNote(noteId);
+      Alert.alert('🔒', t('lock.noteLock'));
+    } catch (e: any) {
+      Alert.alert(t('common.error'), e?.message ?? String(e));
+    }
   };
 
   const [showPicker, setShowPicker] = useState(false);
@@ -1049,7 +1092,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
         <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => { if (saveTimer.current) { clearTimeout(saveTimer.current); persist(); } setPreview((v) => !v); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity onPress={() => { if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; persist(); } setPreview((v) => !v); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={styles.previewBtn}>{preview ? t('editor.write') : t('editor.preview')}</Text>
         </TouchableOpacity>
         <Text style={styles.status} numberOfLines={1}>{statusLabel}</Text>
@@ -1375,7 +1418,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, allNo
       <PromptModal
         visible={promptKind === 'pin'}
         title={t('lock.enterPass')}
-        message="4–8 Ziffern"
+        message={t('lock.pinHint')}
         secure
         keyboardType="number-pad"
         maxLength={8}

@@ -82,7 +82,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   // Zeichnungsinhalte für Karten-Vorschauen (noteId -> Inhalt), aus Cache + Hintergrund-Nachladen
   const [drawings, setDrawings] = useState<Record<number, string>>({});
 
-  const showNoteMenu = (n: Note) => setMenuNote(n);
+  const showNoteMenu = useCallback((n: Note) => setMenuNote(n), []);
 
   const menuAction = async (action: 'pin' | 'duplicate' | 'share' | 'select') => {
     const n = menuNote;
@@ -92,6 +92,29 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       setSelection(new Set([n.id]));
       return;
     }
+    if (action === 'share') {
+      // Vor der Freigabe erklären, was der öffentliche Link bedeutet
+      // (anlehnen an den Bestätigungsdialog im Editor)
+      Alert.alert(t('list.shareConfirmTitle'), t('list.shareConfirmText'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('list.shareCreate'),
+          onPress: async () => {
+            try {
+              const res = await client.shareNote(n.id);
+              const url = (res as any).share_url ?? (res as any).url;
+              if (url) {
+                await Share.share({ title: n.heading, message: url });
+              }
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (e: any) {
+              Alert.alert(t('common.error'), e?.message ?? String(e));
+            }
+          },
+        },
+      ]);
+      return;
+    }
     try {
       if (action === 'pin') {
         await client.setPinned(n.id, !n.pinned);
@@ -99,12 +122,6 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       } else if (action === 'duplicate') {
         await client.duplicateNote(n.id);
         load({ silent: true });
-      } else if (action === 'share') {
-        const res = await client.shareNote(n.id);
-        const url = (res as any).share_url ?? (res as any).url;
-        if (url) {
-          await Share.share({ title: n.heading, message: url });
-        }
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
@@ -113,7 +130,15 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   };
   const locale = getLocale();
 
+  // Sequenz-Schutz für load(): überlappende Aufrufe können sonst eine alte
+  // Antwort die neuere überschreiben lassen — nur die jüngste Anfrage gewinnt
+  const loadSeqRef = useRef(0);
+  // true, solange die Liste Server-Suchergebnisse zeigt (der Suche-Effekt hat
+  // die Basisliste ersetzt) — dann darf loadMore keine Basisseite anhängen
+  const usedServerSearch = useRef(false);
+
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    const seq = ++loadSeqRef.current;
     if (!opts.silent) setLoading(true);
     setError(null);
     // Offline gelöschte Notizen ausblenden, bis der Server die Löschung übernommen hat
@@ -125,6 +150,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         ...(tag ? { tags: tag } : {}),
         limit: PAGE_SIZE, offset: 0,
       });
+      if (seq !== loadSeqRef.current) return; // veraltete Antwort verwerfen
       const rawCount = (res.notes ?? []).length;
       let list = res.notes ?? [];
       // Der Server ignoriert den tags-Parameter je nach Version — deshalb zusätzlich lokal filtern
@@ -141,6 +167,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       // fälschlich als "alle Notizen" erscheinen.
       if (folderId == null && !tag && !workspace) cacheNotes(list).catch(() => {});
     } catch (e: any) {
+      if (seq !== loadSeqRef.current) return; // veraltete Antwort verwerfen
       // Offline: Cache zeigen statt harter Fehler
       const cached = await readCachedNotes<Note[]>();
       if (cached && cached.length > 0) {
@@ -149,13 +176,19 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         setError(e?.message ?? String(e));
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      // Nur die jüngste Anfrage darf die Lade-States zurücksetzen
+      if (seq === loadSeqRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [client, folderId, workspace, tag]);
 
   /** Naechste Seite nachladen (beim Scrollen ans Listenende) */
   const loadMore = useCallback(async () => {
+    // Aktive Server-Suche: die Liste zeigt Suchergebnisse — eine angehängte
+    // ungefilterte Basisseite würde sie verfälschen
+    if (usedServerSearch.current) return;
     if (loadingMore || !hasMore || loading) return;
     setLoadingMore(true);
     try {
@@ -205,9 +238,9 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   useEffect(() => { load(); }, [load]);
 
   // Server-Volltextsuche ab 3 Zeichen (findet auch Inhalte, die nicht geladen sind);
-  // darunter lokales Filtern der geladenen Liste. Veraltete Anfragen werden
-  // abgebrochen, sobald eine neuere Suche startet.
-  const usedServerSearch = useRef(false);
+  // darunter lokales Filtern der geladenen Liste — ehrlich nur nach Titel und Tags,
+  // da Listen-Notizen keinen Inhalt mitliefern (n.content ist in der Liste nie gefüllt).
+  // Veraltete Anfragen werden abgebrochen, sobald eine neuere Suche startet.
   const searchAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     const q = searchQuery.trim();
@@ -275,14 +308,21 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     return () => { cancelled = true; };
   }, [notes, client]);
 
-  const toggleSelect = (id: number) => {
+  const toggleSelect = useCallback((id: number) => {
     setSelection((prev) => {
       if (!prev) return prev;
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  };
+  }, []);
+
+  // Stabile Callbacks für NoteCard: inline-Pfeile im renderItem würden
+  // React.memo der Karten bei jedem Listen-Render wirkungslos machen
+  const handleCardPress = useCallback((n: Note) => {
+    if (selection != null) toggleSelect(n.id);
+    else onOpenNote(n);
+  }, [selection, onOpenNote, toggleSelect]);
 
   const bulkPin = async () => {
     if (!selection) return;
@@ -334,9 +374,11 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     if (showFavorites) out = out.filter((n) => n.favorite);
     const q = searchQuery.trim().toLowerCase();
     if (q && q.length < 3) {
+      // Lokale Suche: Listen-Notizen haben keinen Inhalt — ehrlich nur
+      // Titel und Tags durchsuchen (Inhalte findet erst die Server-Suche)
       out = out.filter((n) =>
         (n.heading ?? '').toLowerCase().includes(q) ||
-        (n.content ?? '').toLowerCase().includes(q));
+        (n.tags ?? '').toLowerCase().includes(q));
     }
     // Kopie sortieren — der State-Array selbst darf nicht mutiert werden
     const sorted = [...out];
@@ -496,7 +538,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
           <NoteCard
             note={item}
             locale={locale}
-            onPress={selection ? () => toggleSelect(item.id) : onOpenNote}
+            onPress={handleCardPress}
             onTagPress={onTagPress}
             onLongPress={showNoteMenu}
             drawingContent={drawings[item.id]}

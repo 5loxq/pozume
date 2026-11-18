@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { usePalette, spacing, radius, typeFor, shadow } from '../theme';
+import { usePalette, spacing, radius, typeFor, shadow, Palette } from '../theme';
 import { t } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { extractTasks, type Task } from '../utils';
@@ -18,9 +18,11 @@ const PRIORITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
 export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = useMemo(() => getStyles(type), [colors]);
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [tasks, setTasks] = useState<(Task & { note?: Note; serverTaskId?: number; priority?: string | null; dueAt?: string | null })[]>([]);
   const [loading, setLoading] = useState(true);
+  // Kurz sichtbare Fehlermeldung (z.B. gescheitertes Umschalten einer Aufgabe)
+  const [error, setError] = useState<string | null>(null);
   const [taskLists, setTaskLists] = useState<Array<{ id: number; heading: string }>>([]);
   const [addPrompt, setAddPrompt] = useState(false);
   const [addText, setAddText] = useState('');
@@ -79,10 +81,22 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
+  /** Fehler kurz sichtbar melden und nach 4s wieder ausblenden */
+  const flashError = useCallback((msg: string) => {
+    setError(msg);
+    setTimeout(() => setError((cur) => (cur === msg ? null : cur)), 4000);
+  }, []);
+
   const toggle = async (task: Task & { note?: Note; serverTaskId?: number }) => {
     if (task.serverTaskId != null) {
-      await client.updateTask(task.noteId, task.serverTaskId, { completed: !task.done }).catch(() => {});
-      load();
+      try {
+        await client.updateTask(task.noteId, task.serverTaskId, { completed: !task.done });
+        load();
+      } catch {
+        // Fehlgeschlagen (z.B. Konflikt): Liste neu laden und kurz melden
+        flashError(t('tasks.toggleFailed'));
+        load();
+      }
       return;
     }
     if (!task.note) return;
@@ -92,8 +106,18 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
     const m = lines[task.lineIndex]?.match(/^(\s*[-*]\s+\[)( |x|X)(\])/);
     if (!m) return;
     lines[task.lineIndex] = m[1] + (task.done ? ' ' : 'x') + m[3] + lines[task.lineIndex].slice(m[0].length);
-    await client.updateNote(task.noteId, { content: lines.join('\n') }).catch(() => {});
-    load();
+    try {
+      await client.updateNote(task.noteId, {
+        content: lines.join('\n'),
+        // if_version der geladenen Notiz mitschicken — verlorene Updates vermeiden
+        ...(detail.note.version ? { if_version: detail.note.version } : {}),
+      });
+      load();
+    } catch {
+      // Fehlgeschlagen (z.B. 409-Konflikt): Liste neu laden und kurz melden
+      flashError(t('tasks.toggleFailed'));
+      load();
+    }
   };
 
   const cyclePriority = async (task: Task & { serverTaskId?: number; priority?: string | null }) => {
@@ -179,7 +203,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
 
   const createInNewList = async (text: string) => {
     try {
-      const res = await client.createNote({ heading: 'Aufgaben', content: '[]', type: 'tasklist' });
+      const res = await client.createNote({ heading: t('tasks.defaultListName'), content: '[]', type: 'tasklist' });
       await client.addTask(res.note.id, { text });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       load();
@@ -255,6 +279,11 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
           <Text style={styles.addIcon}>＋</Text>
         </TouchableOpacity>
       </View>
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : (
@@ -291,23 +320,30 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
   );
 }
 
-const getStyles = (type: ReturnType<typeof typeFor>) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
   safe: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.lg },
   back: { fontSize: 28, width: 40 },
   title: { ...type.title, fontSize: 24, flex: 1, textAlign: 'center' },
   addIcon: { fontSize: 26, width: 40, textAlign: 'right' },
   list: { padding: spacing.lg, paddingTop: 0 },
+  errorBanner: {
+    backgroundColor: colors.dangerSoft, borderRadius: radius.md,
+    marginHorizontal: spacing.lg, marginBottom: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  errorText: { color: colors.danger, fontSize: 13, fontWeight: '600' },
   row: {
     flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.surface,
     borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm,
   },
   checkbox: { width: 36, alignItems: 'center' },
   checkIcon: { fontSize: 22, fontWeight: '700' },
   textWrap: { flex: 1, marginLeft: spacing.sm },
-  taskText: { fontSize: 15, lineHeight: 21 },
+  taskText: { fontSize: 15, lineHeight: 21, color: colors.text },
   doneText: { textDecorationLine: 'line-through', opacity: 0.5 },
-  sourceText: { fontSize: 12, marginTop: 2, opacity: 0.6 },
+  sourceText: { fontSize: 12, marginTop: 2, color: colors.textMuted },
   prioDot: { width: 14, height: 14, borderRadius: 7, marginLeft: spacing.sm },
   center: { alignItems: 'center', paddingVertical: 80 },
   emptyIcon: { fontSize: 44, marginBottom: spacing.md },
