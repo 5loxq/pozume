@@ -32,15 +32,18 @@ const CREATED_KEY = 'pozume.createdIds.v1';
 export interface QueuedWrite {
   /** Eindeutiger Schlüssel: `note-{id}` für bestehende, `new-{sessionId}` für neue Notizen */
   key: string;
-  kind: 'create' | 'update' | 'delete';
+  kind: 'create' | 'update' | 'delete' | 'move';
   noteId?: number;
   body: { heading: string; content: string; tags: string };
   /** Version-Token der Server-Fassung, auf der die Änderung basiert */
   if_version?: string;
   /** Notiz-Typ (Note.type, z.B. 'markdown') — wird beim Create an den Server durchgereicht */
   noteType?: string;
-  /** Zielordner des Creates — offline angelegte Notizen landen im gewählten Ordner (P1-12) */
-  folderId?: number;
+  /** Zielordner — beim Create der Ordner der neuen Notiz (P1-12), beim 'move'
+   *  das Ziel der Verschiebung (P1-9: Ordnerwechsel offline zuverlässig).
+   *  null = oberste Ebene. Bei Updates wird er mitgefhrt, damit ein Konflikt-
+   *  Entwurf weiß, in welchem Ordner die lokale Fassung lag. */
+  folderId?: number | null;
   /** Fehlversuche (Netzwerk) — ab 1 wird vor Create-Wiederholung auf Duplikate geprüft */
   attempts?: number;
   queuedAt: number;
@@ -243,6 +246,12 @@ async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
         await clearDraft(entry.key).catch(() => {});
       } else if (entry.kind === 'delete' && entry.noteId != null) {
         await client.deleteNote(entry.noteId);
+      } else if (entry.kind === 'move' && entry.noteId != null) {
+        // Ordnerwechsel nachholen (P1-9): folder_id ohne if_version — der
+        // Zielfolder ist Metadaten, eine verschobene Notiz wird nicht still
+        // überschrieben. moveNote wegen des Live-Bugs: null wird serverseitig
+        // ignoriert, nur 0 erreicht die oberste Ebene.
+        await client.moveNote(entry.noteId, entry.folderId ?? null);
       } else if (entry.kind === 'update' && entry.noteId != null) {
         await client.updateNote(entry.noteId, {
           ...entry.body,
@@ -256,7 +265,14 @@ async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
       if (status === 409 && e?.data?.code === 'version_conflict' && entry.noteId != null) {
         // Konflikt: lokale Fassung als Entwurf erhalten, Server-Fassung bleibt
         // unangetastet — der Nutzer entscheidet beim nächsten Öffnen der Notiz.
-        await saveDraft(`conflict-${entry.noteId}`, entry.body).catch(() => {});
+        // Ordner der lokalen Fassung mitspeichern, damit die Wiederherstellung
+        // die Notiz nicht in einem anderen Ordner einsortiert zurücklässt.
+        await saveDraft(`conflict-${entry.noteId}`, {
+          heading: entry.body.heading,
+          content: entry.body.content,
+          tags: entry.body.tags,
+          ...(entry.folderId != null ? { folderId: entry.folderId } : {}),
+        }).catch(() => {});
         conflicts.push(entry.noteId);
         flushed++;
         processed.add(pair);

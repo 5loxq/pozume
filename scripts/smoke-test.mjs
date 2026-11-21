@@ -166,8 +166,38 @@ async function main() {
       const res = await fetch(`${API}/notes/${tempId}/attachments`, { method: 'POST', headers: H_NOCT, body: form });
       const data = await res.json().catch(() => ({}));
       assert(res.ok && data.attachment_id, `Upload fehlgeschlagen: HTTP ${res.status}`);
+      // Duplikatschutz der Upload-Queue (P1-8) verlaesst sich auf Name+Groesse
+      const list = await get(`/notes/${tempId}/attachments`);
+      const att = (list.attachments ?? []).find((a) => a.id === data.attachment_id);
+      assert(att?.file_size != null && att.file_size > 0, 'file_size fehlt — Duplikatschutz der App braeuchte Ersatz');
+      assert(!!(att?.original_filename || att?.filename), 'Dateiname fehlt');
       const del = await send(`/notes/${tempId}/attachments/${data.attachment_id}`, 'DELETE');
       assert(del.ok, 'Loeschen fehlgeschlagen');
+    });
+    await check('Ordner wechseln (PATCH folder_id — offline gequeueute Verschiebungen)', async () => {
+      const c = await send('/folders', 'POST', { name: 'smoke-test-folder' });
+      const folderId = c.data.folder?.id ?? c.data.id;
+      assert(folderId != null, `Ordner anlegen fehlgeschlagen: ${c.status}`);
+      try {
+        const m = await send(`/notes/${tempId}`, 'PATCH', { folder_id: folderId });
+        assert(m.ok, `Verschieben fehlgeschlagen: ${m.status}`);
+        const d = await get(`/notes/${tempId}`);
+        assert(d.note?.folder_id === folderId, 'folder_id nicht uebernommen');
+        // Poznote-Bug: folder_id: null wird ignoriert — nur 0 erreicht die
+        // oberste Ebene (App-Workaround moveNote). Beides hier verifizieren:
+        const back = await send(`/notes/${tempId}`, 'PATCH', { folder_id: 0 });
+        assert(back.ok, 'Zurueckverschieben fehlgeschlagen');
+        const rd = await get(`/notes/${tempId}`);
+        assert(rd.note?.folder_id == null, `folder_id nach Zurueckverschieben erwartet null, bekam ${rd.note?.folder_id}`);
+      } finally {
+        await send(`/folders/${folderId}`, 'DELETE');
+      }
+    });
+    await check('Delta-Sync: updated_after wird (noch) ignoriert — bekannte Limitation', async () => {
+      const all = await get('/notes?limit=1');
+      const cut = await get('/notes?limit=1&updated_after=2000-01-01%2000:00:00');
+      assert((all.total ?? 0) === (cut.total ?? -1),
+        `Server filtert jetzt nach updated_after (${all.total} vs ${cut.total}) — Delta-Sync in der App implementieren!`);
     });
     await check('Aufgabe anlegen/loeschen (eigene Taskliste)', async () => {
       const list = await send('/notes', 'POST', { heading: 'Smoke-Aufgaben', content: '[]', type: 'tasklist' });

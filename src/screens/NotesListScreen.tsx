@@ -339,13 +339,38 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   const bulkMove = async (targetId: number | null) => {
     setShowMoveSheet(false);
     if (!selection) return;
-    try {
-      await Promise.all([...selection].map((id) => client.updateNote(id, { folder_id: targetId })));
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setSelection(null);
-      load({ silent: true });
-    } catch (e: any) {
-      Alert.alert(t('common.error'), e?.message ?? String(e));
+    // Verschiebungen einzeln abarbeiten: Offline-Fehler betreffen nur die
+    // betroffene Notiz — der Rest wird normal verschoben statt abzubrechen
+    // (P1-9: Ordnerwechsel müssen auch offline zuverlässig funktionieren)
+    let queuedMoves = 0;
+    let firstError: any = null;
+    for (const id of [...selection]) {
+      try {
+        await client.moveNote(id, targetId);
+      } catch (e: any) {
+        if (e?.status === 0) {
+          // Offline: Verschiebung dauerhaft einreihen — der Server übernimmt
+          // sie bei der nächsten Verbindung
+          await enqueueWrite({
+            key: `move-${id}`,
+            kind: 'move',
+            noteId: id,
+            body: { heading: '', content: '', tags: '' },
+            folderId: targetId,
+          });
+          queuedMoves++;
+        } else if (!firstError) {
+          firstError = e;
+        }
+      }
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setSelection(null);
+    load({ silent: true });
+    if (queuedMoves > 0) {
+      Alert.alert('🪶', t('editor.moveQueued'));
+    } else if (firstError) {
+      Alert.alert(t('common.error'), firstError?.message ?? String(firstError));
     }
   };
 

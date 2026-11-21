@@ -318,6 +318,17 @@ export class PoznoteClient {
     return this.req<{ success: boolean }>(`/notes/${id}`, { method: 'DELETE' });
   }
 
+  /**
+   * Notiz in einen Ordner verschieben (folderId null = oberste Ebene).
+   * Poznote ignoriert `folder_id: null` im PATCH still — die Notiz bliebe im
+   * alten Ordner, während die App "kein Ordner" anzeigt (verifiziert am
+   * Live-Server 6.155). null muss deshalb als 0 gesendet werden, was der
+   * Server als oberste Ebene interpretiert.
+   */
+  moveNote(id: number, folderId: number | null) {
+    return this.updateNote(id, { folder_id: folderId == null ? 0 : folderId });
+  }
+
   duplicateNote(id: number) {
     return this.req<{ note: Note }>(`/notes/${id}/duplicate`, { method: 'POST' });
   }

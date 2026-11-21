@@ -16,6 +16,10 @@ export interface Draft {
   heading: string;
   content: string;
   tags: string;
+  /** Ordner der Entwurfs-Fassung (null/undefined = oberste Ebene). Wird beim
+   *  Restore der Editor-Ansicht nachgezeichnet; Konflikt-Entwürfe wissen so,
+   *  in welchem Ordner die lokale Fassung lag (P0-1). */
+  folderId?: number | null;
   savedAt: number;
 }
 

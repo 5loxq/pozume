@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, FlatList, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Share } from 'react-native';
+import { Share, Image } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -261,13 +261,13 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           noteId: noteIdRef.current ?? undefined,
           body,
           if_version: versionRef.current,
-          // Typ wie beim Online-Create mitliefern — sonst legt der Queue-Flush
-          // Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an; ebenso
-          // den vor dem ersten Speichern gewählten Zielordner (P1-12)
-          ...(noteIdRef.current == null ? {
-            noteType: isDrawingContent(body.content) ? 'note' : 'markdown',
-            ...(folderIdRef.current != null ? { folderId: folderIdRef.current } : {}),
-          } : {}),
+          // Ordner immer mitführen: Bei Creates landet die Notiz im vor dem
+          // ersten Speichern gewählten Zielordner (P1-12), bei Updates weiß ein
+          // Konflikt-Entwurf später, in welchem Ordner die lokale Fassung
+          // lag (P0-1). Typ wie beim Online-Create mitliefern — sonst legt der
+          // Queue-Flush Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an.
+          folderId: folderIdRef.current ?? null,
+          ...(noteIdRef.current == null ? { noteType: isDrawingContent(body.content) ? 'note' : 'markdown' } : {}),
         }).catch(() => {});
         // Der Stand liegt jetzt dauerhaft in der Queue — der zugehörige Entwurf
         // ist verbraucht (verwaiste new-…-Entwürfe würden sich sonst ansammeln;
@@ -325,10 +325,17 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     const draft = conflictDraft;
     setConflictDraft(null);
     if (id != null) clearDraft(`conflict-${id}`).catch(() => {});
-    if (useLocal && draft) {
+    if (useLocal && draft && id != null) {
       setHeading(draft.heading);
       setContent(draft.content);
       setTags(draft.tags);
+      // Ordner der lokalen Fassung nachziehen (P0-1): Lag die Notiz beim
+      // Offline-Bearbeiten in einem anderen Ordner, landet „Wiederherstellen"
+      // sonst im richtigen Inhalt, aber im falschen Ordner.
+      if (draft.folderId != null && draft.folderId !== folderIdRef.current) {
+        setFolderId(draft.folderId);
+        client.moveNote(id, draft.folderId).catch(() => {});
+      }
       // Die Wiederherstellung ist die ausdrückliche Entscheidung für die lokale
       // Fassung — der folgende Autosave überschreibt die neuere Server-Fassung
       // bewusst (kein erneuter 409-Dialog zur bereits getroffenen Wahl, P0-1)
@@ -466,6 +473,20 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       saveDraftNow();
       persistRef.current();
     }
+  }, []);
+
+  // Geteilter Inhalt (Teilen-Menü): sofort lokalen Entwurf schreiben und den
+  // Autosave anstoßen (P1-12). Bisher war der Extension-Eintrag bereits beim
+  // Öffnen des Editors verbraucht — ein Kill vor dem ersten Tastendruck oder
+  // simples Zurückgehen ohne Eingabe hätte den Inhalt still verworfen.
+  // Jetzt überlebt er als Entwurf und „landet genau einmal" per Autosave.
+  useEffect(() => {
+    if (!isNew || !prefill || drawing) return;
+    if (!(prefill.heading || prefill.content) && !initialAttachment) return;
+    saveDraftNow();
+    scheduleSave();
+    // Bewusst nur beim ersten Öffnen — Tastatureingaben starten regulär selbst
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Entwurf einer NEUEN Notiz wiederherstellen (P0-2): Wurde die App beendet,
@@ -693,6 +714,10 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           if (await getOfflineAttachment(a.id).catch(() => null)) local.push(a.id);
         }
         setOfflineAtts(new Set(local));
+        // Inline-Vorschau für Bild-Anhänge nachziehen (nur kleine Dateien)
+        for (const a of r.attachments ?? []) {
+          if (isImageAtt(a)) loadAttachmentPreview(a);
+        }
       })
       .catch(() => {});
     // Wartende Uploads aus der letzten Sitzung (offline fehlgeschlagen): als
@@ -717,6 +742,31 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       .then((r) => setServerReminder(r.reminder?.reminder_at ?? null))
       .catch(() => {});
   }, [note?.id]);
+
+  // --- Inline-Vorschau für Bild-Anhänge (P1-8: Bilder anZEIGEN, nicht nur
+  // als Dateiname-Chip anbieten). Bytes kommen bevorzugt aus der (verschlüsselten)
+  // Offline-Kopie, sonst vom Server; die dekodierte Cache-Datei bleibt im
+  // Cache-Verzeichnis, das iOS selbst aufräumt. Sehr große Dateien werden
+  // übersprungen (Speicher), Text/Video bleiben wie bisher über das Teilen-Menü.
+  const [attImagePaths, setAttImagePaths] = useState<Record<string, string>>({});
+  const isImageAtt = (att: Attachment) =>
+    (att.file_type ?? '').toLowerCase().startsWith('image/') ||
+    /\.(png|jpe?g|gif|webp|heic|heif|bmp)$/i.test(att.original_filename || att.filename || '');
+  const loadAttachmentPreview = async (att: Attachment) => {
+    if (attImagePaths[att.id]) return;
+    try {
+      if ((att.file_size ?? 0) > 8 * 1024 * 1024) return;
+      let bytes = await readOfflineAttachmentBytes(att.id).catch(() => null);
+      if (!bytes && noteIdRef.current != null) {
+        bytes = await client.getAttachmentBytes(noteIdRef.current, att.id);
+      }
+      if (!bytes || bytes.length === 0) return;
+      const safeName = (att.original_filename || att.filename || 'anhang').replace(/[/\\?%*:|\"<>\n]/g, '_');
+      const path = `${FileSystem.cacheDirectory}pozume-att-preview-${att.id}-${safeName}`;
+      await FileSystem.writeAsStringAsync(path, base64FromBytes(bytes), { encoding: FileSystem.EncodingType.Base64 });
+      setAttImagePaths((prev) => ({ ...prev, [att.id]: path }));
+    } catch { /* Vorschau ist Bonus — Chip/Teilen funktioniert weiter */ }
+  };
 
   const openAttachment = async (att: Attachment) => {
     if (noteId == null) return;
@@ -1019,6 +1069,9 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       if (uploaded) {
         const atts = await client.listAttachments(noteId);
         setAttachments(atts.attachments ?? []);
+        for (const a of atts.attachments ?? []) {
+          if (isImageAtt(a)) loadAttachmentPreview(a);
+        }
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('🪶', t('editor.uploaded'));
       }
@@ -1208,10 +1261,26 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       return;
     }
     try {
-      await client.updateNote(noteId, { folder_id: targetId });
+      await client.moveNote(noteId, targetId);
       setFolderId(targetId);
       onSaved({ ...(note as Note), folder_id: targetId });
     } catch (e: any) {
+      if (e?.status === 0) {
+        // Offline: Ordnerwechsel einreihen und lokal übernehmen — der Server
+        // zieht ihn bei der nächsten Verbindung nach (P1-9). Das Feld ist
+        // reine Metadaten: Inhalts-Konflikte sind dadurch ausgeschlossen.
+        enqueueWrite({
+          key: `move-${noteId}`,
+          kind: 'move',
+          noteId,
+          body: { heading: '', content: '', tags: '' },
+          folderId: targetId,
+        }).catch(() => {});
+        setFolderId(targetId);
+        onSaved({ ...(note as Note), folder_id: targetId });
+        Alert.alert('🪶', t('editor.moveQueued'));
+        return;
+      }
       Alert.alert(t('common.error'), e?.message ?? String(e));
     }
   };
@@ -1603,6 +1672,17 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
                 </TouchableOpacity>
               ))}
             </View>
+            {attachments.filter((a) => attImagePaths[a.id]).map((a) => (
+              <TouchableOpacity
+                key={`img-${a.id}`}
+                style={styles.attachImageWrap}
+                onPress={() => openAttachment(a)}
+                onLongPress={() => confirmDeleteAttachment(a)}
+                activeOpacity={0.85}
+              >
+                <Image source={{ uri: attImagePaths[a.id] }} style={styles.attachImage} resizeMode="cover" />
+              </TouchableOpacity>
+            ))}
           </View>
         )}
         {!isNew && backlinks != null && backlinks.length > 0 && (
@@ -1779,6 +1859,8 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   },
   attachName: { fontSize: 13, fontWeight: '600', color: colors.primary },
   attachSize: { fontSize: 11, color: colors.textFaint, marginTop: 1 },
+  attachImageWrap: { marginTop: spacing.sm, borderRadius: radius.md, overflow: 'hidden' },
+  attachImage: { width: '100%', height: 220, borderRadius: radius.md, backgroundColor: colors.bg },
   backlinkSection: { marginTop: spacing.lg },
   backlinkRow: {
     backgroundColor: colors.bg, borderRadius: radius.md,
