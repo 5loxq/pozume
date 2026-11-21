@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pozume",
     "slug": "pozume",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "orientation": "portrait",
     "scheme": "pozume",
     "userInterfaceStyle": "automatic",
@@ -13,7 +13,7 @@
         "NSFaceIDUsageDescription": "Pozume schützt deine Notizen mit Face ID.",
         "NSCameraUsageDescription": "Pozume kann Fotos aufnehmen und als Anhang an Notizen anfügen."
       },
-      "buildNumber": "4"
+      "buildNumber": "5"
     },
     "android": {
       "package": "de.inthielligent.pozume"

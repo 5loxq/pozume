@@ -5,6 +5,10 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-21 — Versionshub 0.7.0 (Build 5) + Kommentar-Audit der Runden 1-3
+
+Kommentar-Audit: Alle in Runde 1-3 (P0-Fixrunde, P1-Runde, Live-Server-Runde) hinzugekommenen Code-Blöcke gegen den Repo-Kommentierstandard geprueft — Upload-Queue, Offline-Move, Redirect-Preflight/MoveNote, Anhangs-Verschluesselung, Bildvorschau, nativer Overlay, Share-Dateien sowie alle Hintergrund-Logik tragen blockweise Begruendung (Warum, Abnahmekriterium, Verweis auf den Listenpunkt). Keine Luecken gefunden, kein Nachbesserungsbedarf. Versionshub auf 0.7.0 synchron in package.json, app.json (expo.version + ios.buildNumber 5) und allen sechs Build-Konfigurationen der drei Targets in project.pbxproj — die Info.plists lesen aus MARKETING_VERSION/CURRENT_PROJECT_VERSION und zeigen im gebauten App-, Share- und Widget-Bundle verifiziert 0.7.0/5. Verifikation: tsc fehlerfrei, xcodebuild (App, ShareExtension, Widget) erfolgreich mit 0.7.0/5 im Produkt.
+
 ## 2026-11-21 — Doku: SERVER-BUGS.md im Repo-Root
 
 Die beiden gefundenen Poznote-Server-Fehler (still ignoriertes folder_id:null beim PATCH; endgültiges Mitlöschen von Notizen beim Ordnerlöschen ohne Papierkorb/Restore) plus die Delta-Sync-Limitation sind als eigene Datei SERVER-BUGS.md im Root dokumentiert — mit Reproduktionsschritten, verifizierten curl-Transkripten, Auswirkung und App-Workarounds, als Grundlage für eine Meldung im Poznote-Projekt.
