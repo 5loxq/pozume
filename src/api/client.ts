@@ -168,16 +168,53 @@ export class PoznoteClient {
    * und sendet die Authorization-Header mit. Würde eine Weiterleitung den
    * konfigurierten Server verlassen, landen die Zugangsdaten bei einem fremden
    * Host — das wird hier erkannt und abgewiesen (nach dem ersten Request).
+   *
+   * Fail-closed: Ist die Ziel-URL nicht verfügbar oder nicht auswertbar,
+   * wird die Anfrage ebenfalls abgewiesen — „prüfen nicht möglich" darf
+   * nie „durchlassen" bedeuten.
    */
   private assertSameOrigin(res: Response): void {
     const finalUrl = (res as any).url;
-    if (typeof finalUrl !== 'string' || !finalUrl) return; // URL nicht verfügbar → prüfen nicht möglich
-    let finalOrigin: string | null = null;
-    try { finalOrigin = new URL(finalUrl).origin; } catch { return; }
+    if (typeof finalUrl !== 'string' || !finalUrl) throw new PoznoteError(0, 'redirect-unverifiable');
+    let finalOrigin: string;
     let cfgOrigin: string;
-    try { cfgOrigin = new URL(this.cfg.baseUrl).origin; } catch { return; }
+    try { finalOrigin = new URL(finalUrl).origin; } catch { throw new PoznoteError(0, 'redirect-unverifiable'); }
+    try { cfgOrigin = new URL(this.cfg.baseUrl).origin; } catch { throw new PoznoteError(0, 'redirect-unverifiable'); }
     if (finalOrigin !== cfgOrigin) {
       throw new PoznoteError(0, `redirect-offsite: ${finalUrl}`);
+    }
+  }
+
+  /**
+   * Redirect-Preflight vor der ersten autorisierten Anfrage (P0-4): RN-fetch
+   * sendet die Authorization-Header schon beim Folgen einer Weiterleitung —
+   * ob dieser Schritt Zugangsdaten an einen fremden Host leakt, ist erst
+   * NACH dem Request erkennbar. Deshalb prüft der Login VOR dem Speichern der
+   * Zugangsdaten unangemeldet, ob der Server auf einen anderen Ursprung leitet:
+   * Ohne Zugangsdaten ist das Folgen ungefährlich, und die finale URL verrät
+   * das Ziel. Leitet der Server weg, wird die Anmeldung verweigert.
+   * (Kam die Antwort nie an, scheitert die anschließende Anmeldung ohnehin dort.)
+   */
+  static async verifyNoOffsiteRedirect(baseUrl: string): Promise<void> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    let finalUrl: unknown;
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/system/version`, { signal: controller.signal });
+      finalUrl = (res as any).url;
+    } catch {
+      return; // Server unerreichbar → die autorisierte Anmeldung scheitert dann eben dort
+    } finally {
+      clearTimeout(timer);
+    }
+    // Ohne Zugangsdaten ist hier nichts geflossen — URL unbekannt heißt noch kein Leck
+    if (typeof finalUrl !== 'string' || !finalUrl) return;
+    let finalOrigin: string;
+    let cfgOrigin: string;
+    try { finalOrigin = new URL(finalUrl).origin; } catch { return; }
+    try { cfgOrigin = new URL(baseUrl).origin; } catch { return; }
+    if (finalOrigin !== cfgOrigin) {
+      throw new PoznoteError(0, 'login.redirectOffsite');
     }
   }
 

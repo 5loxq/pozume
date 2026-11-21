@@ -32,6 +32,11 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
         return;
       }
       const client = new PoznoteClient({ baseUrl: base, username, password });
+      // Redirect-Preflight (P0-4): BEVOR Zugangsdaten gespeichert oder gesendet
+      // werden, unangemeldet prüfen, ob der Server auf einen fremden Ursprung
+      // leitet — RN-fetch sendet die Authorization-Header schon beim Folgen einer
+      // Weiterleitung und macht das Leck erst danach erkennbar.
+      await PoznoteClient.verifyNoOffsiteRedirect(base);
       await client.listNotes();
       // Kontowechsel: lokale Daten des vorherigen Kontos entfernen,
       // bevor die neuen Zugangsdaten gespeichert werden
@@ -43,7 +48,8 @@ export default function LoginScreen({ onConnected }: { onConnected: (c: any) => 
       onConnected(client);
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      setError(msg.includes('network') || msg.includes('Network request failed')
+      if (msg.includes('login.redirectOffsite')) setError(t('login.redirect'));
+      else setError(msg.includes('network') || msg.includes('Network request failed')
         ? t('login.unreachable')
         : msg);
     } finally {

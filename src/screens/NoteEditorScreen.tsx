@@ -12,8 +12,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite, takeCreatedId } from '../api/offlineQueue';
-import { saveDraft, readDraft, clearDraft, type Draft } from '../api/drafts';
-import { getOfflineAttachment, downloadAttachmentOffline, removeOfflineAttachment } from '../api/attachmentStore';
+import { saveDraft, readDraft, clearDraft, latestNewDraft, type Draft } from '../api/drafts';
+import { getOfflineAttachment, readOfflineAttachmentBytes, downloadAttachmentOffline, removeOfflineAttachment } from '../api/attachmentStore';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin, pinRetryDelay } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
@@ -64,7 +64,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     isNew && drawing ? emptyDrawingHtml() : (note?.content ?? prefill?.content ?? ''),
   );
   const [tags, setTags] = useState(note?.tags ?? '');
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'queued' | 'failed'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'local' | 'queued' | 'failed' | 'conflict'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
   const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
   const [favorite, setFavorite] = useState(!!note?.favorite);
@@ -120,12 +120,27 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   // In-Flight-Guard: überlappende persist()-Aufrufe (Autosave-Timer + Unmount-
   // Cleanup) würden sonst bei neuen Notizen dieselbe Notiz doppelt anlegen
   const persistingRef = useRef(false);
+  // Änderungen, die während eines laufenden persist eingingen (Tastatureingabe,
+  // Unmount-Cleanup): Der Abschluss des Requests holt sie nach, statt sie
+  // still im lokalen Entwurf liegen zu lassen und fälschlich „gespeichert" zu melden
+  const rescheduleRef = useRef(false);
+  // Konflikt-Entwurf wiederhergestellt (Banner „Offline-Fassung wiederherstellen"):
+  // Der Nutzer hat sich damit bereits für die lokale Fassung entschieden — der
+  // nächste Speichervorgang überschreibt die neuere Server-Fassung bewusst und
+  // darf dafür keinen erneuten 409-Dialog zur selben Entscheidung auslösen.
+  // Verbraucht wird das Flag erst nach einem erfolgreichen Speichern.
+  const overwriteNextSaveRef = useRef(false);
   const persist = async (opts: { ignoreVersion?: boolean } = {}) => {
-    if (persistingRef.current) return;
+    // Schreibgeschützte Formate und serverseitig gesperrte Notizen niemals
+    // zurückschreiben — der PATCH wäre verlorene Arbeit bzw. ein 403 (P0-6)
+    if (writeBlockedRef.current) return;
+    if (persistingRef.current) { rescheduleRef.current = true; return; }
     persistingRef.current = true;
     setSaveState('saving');
-    const body = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
+    const snap = { heading: latest.current.heading, content: latest.current.content, tags: latest.current.tags };
+    const body = { ...snap };
     const queueKey = noteIdRef.current != null ? `note-${noteIdRef.current}` : localQueueKey;
+    const ignoreVersion = opts.ignoreVersion || overwriteNextSaveRef.current;
     try {
       if (noteIdRef.current == null) {
         // Hat der Queue-Flush diese Notiz bereits auf dem Server angelegt
@@ -154,20 +169,44 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
         // antwortet der Server 409 mit dem aktuellen Stand — kein stilles Überschreiben.
         const res = await client.updateNote(noteIdRef.current, {
           ...body,
-          ...(opts.ignoreVersion ? {} : versionRef.current ? { if_version: versionRef.current } : {}),
+          ...(ignoreVersion ? {} : versionRef.current ? { if_version: versionRef.current } : {}),
         });
         if (res.note?.version) versionRef.current = res.note.version;
+        // Überschreiben war die ausdrückliche Nutzerentscheidung — vollzogen
+        if (ignoreVersion) overwriteNextSaveRef.current = false;
         onSaved({ ...(note as Note), ...body, updated_at: new Date().toISOString() });
       }
-      setSaveState('saved');
       removeWrite(queueKey).catch(() => {});
       // Server-Stand ist synchron — lokale Entwürfe dieser Notiz verwerfen
       clearDraft(localQueueKey).catch(() => {});
       if (noteIdRef.current != null) clearDraft(`note-${noteIdRef.current}`).catch(() => {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Neuere Änderungen während des Requests? Nicht „gespeichert" melden —
+      // stattdessen sofort nachspeichern (P0-3: alte Antworten dürfen neuere
+      // Änderungen weder zurücksetzen noch als gesichert ausgeben)
+      const newer =
+        snap.heading !== latest.current.heading ||
+        snap.content !== latest.current.content ||
+        snap.tags !== latest.current.tags;
+      if (newer) {
+        setSaveState('dirty');
+        scheduleSave();
+      } else {
+        setSaveState('saved');
+      }
       // Notiz existiert jetzt — initialen Anhang nachziehen (still bei Fehler)
       uploadInitialAttachment();
+      return;
     } catch (e: any) {
+      const msg = String(e?.message ?? '');
+      // Sicherheitsereignis, kein Offline-Fall: Eine Weiterleitung hat den
+      // konfigurierten Server verlassen oder sich nicht prüfen lassen — der
+      // Schreibvorgang wird NICHT endlos für einen lateren Sync wiederholt
+      if (e?.status === 0 && (msg.startsWith('redirect-unverifiable') || msg.startsWith('redirect-offsite'))) {
+        setSaveState('failed');
+        Alert.alert(t('common.error'), t('editor.unsecureServer'));
+        return;
+      }
       if (e?.status === 0) {
         // Offline: Schreibvorgang dauerhaft einreihen — kein Datenverlust bei App-Kill.
         // Die Queue wird beim nächsten Start/Vordergrund-Wechsel automatisch geleert.
@@ -181,19 +220,29 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           // Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an
           ...(noteIdRef.current == null ? { noteType: isDrawingContent(body.content) ? 'note' : 'markdown' } : {}),
         }).catch(() => {});
+        // Der Stand liegt jetzt dauerhaft in der Queue — der zugehörige Entwurf
+        // ist verbraucht (verwaiste new-…-Entwürfe würden sich sonst ansammeln;
+        // neuere Eingaben schreiben ihn ohnehin nach 400 ms neu)
+        clearDraft(queueKey).catch(() => {});
         setSaveState('queued');
         return;
       }
       if (e?.status === 409 && e?.data?.code === 'version_conflict') {
-        setSaveState('dirty');
+        setSaveState('conflict');
         handleVersionConflict(e.data.current);
         return;
       }
       setSaveState('failed');
-      const msg = e?.message ?? String(e);
       Alert.alert(t('common.error'), msg.includes('403') ? t('editor.lockFailed') : msg);
+      return;
     } finally {
       persistingRef.current = false;
+      if (rescheduleRef.current) {
+        rescheduleRef.current = false;
+        // Erfolg: Änderungen nachziehen. Misserfolg: mindestens den lokalen
+        // Entwurf sichern — endloses Offline-Neuversuchen wäre ein Loop.
+        saveDraftNow();
+      }
     }
   };
 
@@ -231,7 +280,14 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       setHeading(draft.heading);
       setContent(draft.content);
       setTags(draft.tags);
+      // Die Wiederherstellung ist die ausdrückliche Entscheidung für die lokale
+      // Fassung — der folgende Autosave überschreibt die neuere Server-Fassung
+      // bewusst (kein erneuter 409-Dialog zur bereits getroffenen Wahl, P0-1)
+      overwriteNextSaveRef.current = true;
       scheduleSave();
+    } else if (!useLocal) {
+      // Server-Fassung bleibt im Editor — sie IST der aktuelle Stand
+      setSaveState('saved');
     }
   };
 
@@ -274,10 +330,18 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     }).catch(() => {});
   };
   const scheduleSave = () => {
+    // Schreibgeschützte Formate / serverseitig gesperrte Notizen: kein Autosave
+    if (writeBlockedRef.current) return;
     setSaveState('dirty');
     ensureLock();
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => { draftTimer.current = null; saveDraftNow(); }, 400);
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null;
+      saveDraftNow();
+      // Sichtbarer Zwischenstand (P0-3): Änderung ist lokal gesichert, die
+      // Übertragung zum Server läuft noch („Ungespeichert" wäre gelogen)
+      setSaveState((s) => (s === 'dirty' ? 'local' : s));
+    }, 400);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     // Timer-Ref im Callback nullen — sonst hält der Unmount-Cleanup einen
     // bereits gefeuerten Timer für aktiv und speichert doppelt
@@ -339,8 +403,44 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
+      // Läuft bereits ein persist, kehrt das sofort zurück (In-Flight-Guard).
+      // Der bisherige Code hätte die Änderungen dann einfach fallen gelassen —
+      // hier bleibt der letzte Stand mindestens im lokalen Entwurf (P0-2),
+      // der Abschluss des Requests holt ihn via rescheduleRef nach.
+      saveDraftNow();
       persistRef.current();
     }
+  }, []);
+
+  // Entwurf einer NEUEN Notiz wiederherstellen (P0-2): Wurde die App beendet,
+  // bevor der erste Server-Autosave durchkam (Absturz, Kill, leerer Akku,
+  // kein Netz), liegt die jüngste ungespeicherte Fassung noch unter einem
+  // `new-…`-Schlüssel. Der jüngste wird hier angeboten; ältere verwaiste
+  // Entwürfe rücken in späteren neuen Notizen nach. Vorbelegte Inhalte
+  // (Teilen-Menü) und Zeichnungen haben Vorrang.
+  useEffect(() => {
+    if (!isNew || prefill || drawing) return;
+    let cancelled = false;
+    latestNewDraft().then(async (found) => {
+      if (cancelled || !found) return;
+      const d = found.draft;
+      if (!(d.heading || d.content || d.tags)) return;
+      // Erst unter dem frischen Sitzungs-Schlüssel NEU sichern, dann Queue-
+      // Eintrag und alten Entwurf freigeben — schließt der Nutzer genau
+      // dazwischen, liegt der Inhalt mindestens doppelt weiter bereit.
+      await saveDraft(localQueueKey, d).catch(() => {});
+      await removeWrite(found.key).catch(() => {});
+      await clearDraft(found.key).catch(() => {});
+      if (cancelled) return;
+      setHeading(d.heading);
+      setContent(d.content);
+      setTags(d.tags);
+      setDraftRestored(true);
+      scheduleSave();
+    });
+    return () => { cancelled = true; };
+    // Neue Notizen haben keine ID; Restore läuft bewusst nur einmal pro Öffnen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const confirmDelete = () => {
@@ -431,6 +531,12 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   // Nicht unterstützte Formate (html, tasklist, …) schreibgeschützt öffnen —
   // Bearbeiten im Text-Editor würde die Struktur beschädigen
   const formatReadOnly = !isNew && !isExcalidraw && noteType != null && !EDITABLE_TYPES.has(noteType);
+  // Schreibschutz auch in Timern verfügbar (persist/scheduleSave feuern mit
+  // älteren Closures) — daher als Ref gespiegelt. Verhindert, dass an einer
+  // schreibgeschützten oder serverseitig gesperrten Notiz überhaupt gesendet
+  // wird — der PATCH wäre verlorene Arbeit bzw. ein 403 (P0-6).
+  const writeBlockedRef = useRef(false);
+  writeBlockedRef.current = formatReadOnly || serverLocked;
 
   // Volle Notiz nachladen (Inhalt fehlt in der Listen-Antwort)
   useEffect(() => {
@@ -459,7 +565,12 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
         // Erfolgreich synchronisierte Entwürfe wurden beim Speichern gelöscht.
         // Bei schreibgeschützten Formaten keinen Entwurf einspielen — der
         // Autosave würde sonst Fremdformate beschädigen.
-        const editableFormat = n.type == null || EDITABLE_TYPES.has(n.type) || isDrawingContent(c);
+        const editableFormat = n.type == null
+          // Ältere Server ohne type-Feld: HTML-artige Inhalte (erkennbar am
+          // führenden Tag) keinen Entwurf einspielen lassen — der Autosave
+          // würde sonst Fremdformaten schaden (P0-6)
+          ? isDrawingContent(c) || !/^\s*</.test(c.trim())
+          : (EDITABLE_TYPES.has(n.type) || isDrawingContent(c));
         const draft = await readDraft(`note-${note.id}`);
         if (!cancelled && draft && editableFormat &&
             (draft.heading !== (n.heading ?? '') || draft.content !== (n.content ?? '') || draft.tags !== (n.tags ?? ''))) {
@@ -544,10 +655,16 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   const openAttachment = async (att: Attachment) => {
     if (noteId == null) return;
     try {
-      // Offline-Kopie zuerst — funktioniert ohne Verbindung
-      const localPath = await getOfflineAttachment(att.id).catch(() => null);
+      // Offline-Kopie zuerst — funktioniert ohne Verbindung. Die liegt
+      // verschlüsselt auf der Platte (P0-5) und wird erst hier entschlüsselt
+      // und in eine temporäre Cache-Datei entpackt.
       const fileName = att.original_filename || att.filename || 'anhang';
-      let path = localPath;
+      let path: string | null = null;
+      const localBytes = await readOfflineAttachmentBytes(att.id).catch(() => null);
+      if (localBytes) {
+        path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
+        await FileSystem.writeAsStringAsync(path, base64FromBytes(localBytes), { encoding: FileSystem.EncodingType.Base64 });
+      }
       if (!path) {
         const bytes = await client.getAttachmentBytes(noteId, att.id);
         path = `${FileSystem.cacheDirectory}${fileName.replace(/[/\\]/g, '_')}`;
@@ -1022,8 +1139,10 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   const statusLabel =
     saveState === 'saving' ? t('editor.saving') :
     saveState === 'saved' ? t('editor.saved') :
+    saveState === 'local' ? t('editor.savedLocal') :
     saveState === 'queued' ? t('editor.queued') :
     saveState === 'failed' ? t('editor.failed') :
+    saveState === 'conflict' ? t('editor.conflictState') :
     saveState === 'dirty' ? t('editor.unsaved') : '';
 
   if (!loaded) {
@@ -1318,7 +1437,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           placeholderTextColor={colors.textFaint}
           value={heading}
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
-          editable={!serverLocked}
+          editable={!serverLocked && !formatReadOnly}
         />
         {isExcalidraw && drawingContent ? (
           <DrawingEditor
@@ -1353,6 +1472,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           placeholderTextColor={colors.textFaint}
           value={tags}
           onChangeText={(v) => { setTags(v); scheduleSave(); }}
+          editable={!serverLocked && !formatReadOnly}
           autoCapitalize="none"
         />
         {tagSuggestions.length > 0 && (

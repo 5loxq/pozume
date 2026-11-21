@@ -1,15 +1,21 @@
 import * as FileSystem from 'expo-file-system';
-import { secureSetItem, secureGetItem } from './secureStorage';
+import { secureSetItem, secureGetItem, secureEncryptBytes, secureDecryptBytes } from './secureStorage';
+import { base64ToBytes } from './crypto';
 import type { PoznoteClient } from './client';
 
 /**
  * Gezielte Offline-Verfügbarkeit von Anhängen (P1-8): ausgewählte Anhänge
  * werden in das Dokumentenverzeichnis heruntergeladen und bleiben ohne
  * Verbindung öffnbar. Die Zuordnung Anhang → lokale Datei liegt verschlüsselt
- * im Manifest; beim Abmelden wird alles entfernt (Kontotrennung).
+ * im Manifest — und auch die DATEI selbst wird AES-verschlüsselt geschrieben
+ * (verschlüsselte Ablage ist nur dann ein Schutz, wenn nicht nebenan eine
+ * Klartext-Kopie in demselben Verzeichnis liegt; P0-5). Erst beim Öffnen wird
+ * entschlüsselt und in eine temporäre Cache-Datei entpackt.
+ * Beim Abmelden wird alles entfernt (Kontotrennung).
  */
 const MANIFEST_KEY = 'pozume.attachments.v1';
 const DIR = `${FileSystem.documentDirectory}pozume-attachments/`;
+const ENC_PREFIX = 'enc1:';
 
 /** attachmentId -> lokaler Dateipfad */
 type Manifest = Record<string, string>;
@@ -46,16 +52,35 @@ export async function downloadAttachmentOffline(
   try { await FileSystem.makeDirectoryAsync(DIR, { intermediates: true }); } catch {}
   const safeName = (att.original_filename || att.filename || 'anhang').replace(/[/\\?%*:|"<>]/g, '_');
   const path = `${DIR}${att.id}-${safeName}`;
-  // Base64 in Chunks schreiben (große Dateien sprengen sonst den String)
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  await FileSystem.writeAsStringAsync(path, btoa(binary), { encoding: FileSystem.EncodingType.Base64 });
+  // Verschlüsselt schreiben (P0-5): Der Schlüssel liegt in der Keychain, die
+  // Datei enthält nur Chiffre — ein Zugriff auf das Dokumentenverzeichnis
+  // allein genügt nicht, den Inhalt zu lesen.
+  const payload = await secureEncryptBytes(bytes);
+  await FileSystem.writeAsStringAsync(path, payload, { encoding: FileSystem.EncodingType.UTF8 });
   const m = await readManifest();
   m[att.id] = path;
   await writeManifest(m);
+}
+
+/**
+ * Inhalt einer Offline-Kopie lesen und entschlüsseln — die App entschlüsselt
+ * erst hier und schreibt eine temporäre Klartext-Kopie (Aufrufer), die nach
+ * dem Teilen im Cache-Verzeichnis bleibt (dort räumt iOS selbst auf).
+ * Liefert null, wenn keine Offline-Kopie existiert oder sie lesbar zerstört ist.
+ */
+export async function readOfflineAttachmentBytes(attachmentId: string): Promise<Uint8Array | null> {
+  const m = await readManifest();
+  const path = m[attachmentId];
+  if (!path) return null;
+  try {
+    if (!(await FileSystem.getInfoAsync(path).then((i) => i.exists))) return null;
+    const raw = await FileSystem.readAsStringAsync(path, { encoding: FileSystem.EncodingType.UTF8 });
+    // Alt: vor der Verschlüsselung direkt als Base64-Klartext abgelegte Kopien
+    if (!raw.startsWith(ENC_PREFIX)) return base64ToBytes(raw);
+    return await secureDecryptBytes(raw);
+  } catch {
+    return null;
+  }
 }
 
 /** Offline-Kopie entfernen (Anhang bleibt auf dem Server) */

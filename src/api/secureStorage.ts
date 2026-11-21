@@ -64,6 +64,34 @@ export async function secureGetItem(key: string): Promise<string | null> {
   }
 }
 
+/**
+ * Binärdaten (z.B. Offline-Kopien von Anhängen) mit dem Keychain-Schlüssel
+ * verschlüsseln — für Inhalte, die als Datei statt als AsyncStorage-Wert
+ * abgelegt werden. Liefert dasselbe Format wie secureSetItem ("enc1:iv.ct").
+ */
+export async function secureEncryptBytes(bytes: Uint8Array): Promise<string> {
+  const dataKey = await getDataKey();
+  const iv = getRandomBytes(16);
+  const ct = aesCtr(dataKey, iv, bytes);
+  return `${PREFIX}${bytesToBase64(iv)}.${bytesToBase64(ct)}`;
+}
+
+/** Mit secureEncryptBytes verschlüsselte Bytes wieder entschlüsseln (enc1-Format). */
+export async function secureDecryptBytes(payload: string): Promise<Uint8Array | null> {
+  if (typeof payload !== 'string' || !payload.startsWith(PREFIX)) return null;
+  try {
+    const dot = payload.indexOf('.', PREFIX.length);
+    if (dot < 0) return null;
+    const iv = base64ToBytes(payload.slice(PREFIX.length, dot));
+    const ct = base64ToBytes(payload.slice(dot + 1));
+    if (iv.length !== 16 || ct.length === 0) return null;
+    const dataKey = await getDataKey();
+    return aesCtr(dataKey, iv, ct);
+  } catch {
+    return null;
+  }
+}
+
 /** Schlüssel für Verschlüsselung und gespeicherte Zugangsdaten entfernen (Logout) */
 export async function clearDataKey(): Promise<void> {
   keyPromise = null;

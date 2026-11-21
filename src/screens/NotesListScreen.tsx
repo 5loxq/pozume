@@ -13,7 +13,7 @@ import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import NoteCard from '../components/NoteCard';
 import { readCachedNotes, cacheNotes } from '../api/cache';
-import { pendingDeleteIds } from '../api/offlineQueue';
+import { pendingDeleteIds, enqueueWrite } from '../api/offlineQueue';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { readDrawingCache, writeDrawingCache } from '../api/drawCache';
 import { isDrawingContent } from '../components/DrawingEditor';
@@ -356,13 +356,38 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       {
         text: t('common.delete'), style: 'destructive',
         onPress: async () => {
-          try {
-            await Promise.all([...selection].map((id) => client.deleteNote(id)));
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            setSelection(null);
-            load({ silent: true });
-          } catch (e: any) {
-            Alert.alert(t('common.error'), e?.message ?? String(e));
+          // Löschungen einzeln abarbeiten: Offline-Fehler betreffen nur die
+          // betroffene Notiz — der Rest wird normal gelöscht statt komplett
+          // abzubrechen (P1-7: auch Löschungen aus der Liste müssen offline
+          // zuverlässig funktionieren, nicht nur aus dem Editor heraus)
+          let queuedDeletes = 0;
+          let firstError: any = null;
+          for (const id of [...selection]) {
+            try {
+              await client.deleteNote(id);
+            } catch (e: any) {
+              if (e?.status === 0) {
+                // Offline: Löschung dauerhaft einreihen und lokal ausblenden —
+                // der Server übernimmt sie bei der nächsten Verbindung
+                await enqueueWrite({
+                  key: `delete-${id}`,
+                  kind: 'delete',
+                  noteId: id,
+                  body: { heading: '', content: '', tags: '' },
+                });
+                queuedDeletes++;
+              } else if (!firstError) {
+                firstError = e;
+              }
+            }
+          }
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setSelection(null);
+          load({ silent: true });
+          if (queuedDeletes > 0) {
+            Alert.alert('🪶', t('editor.deleteQueued'));
+          } else if (firstError) {
+            Alert.alert(t('common.error'), firstError?.message ?? String(firstError));
           }
         },
       },

@@ -1,6 +1,6 @@
 import { secureSetItem, secureGetItem } from './secureStorage';
 import type { PoznoteClient } from './client';
-import { saveDraft } from './drafts';
+import { saveDraft, readDraft, clearDraft } from './drafts';
 
 /**
  * Persistente Schreib-Queue für Offline-Bearbeitung.
@@ -109,6 +109,18 @@ export async function removeWrite(key: string): Promise<void> {
   await writeAll(q.filter((e) => e.key !== key));
 }
 
+/**
+ * Einzelnen Eintrag anhand (key, queuedAt) sofort dauerhaft entfernen —
+ * ohne die anderen zu berühren. Aufrufnach einem erfolgreichen Server-Create:
+ * Stirbt die App zwischen Server-Anlage und dem gesammelten Speichern der
+ * Queue am Ende des Flushs, würde der nächste Flush dieselbe Notiz sonst
+ * erneut anlegen (Duplikat).
+ */
+async function removePair(pair: string): Promise<void> {
+  const q = await readAll();
+  await writeAll(q.filter((e) => `${e.key}|${e.queuedAt}` !== pair));
+}
+
 export async function queueSize(): Promise<number> {
   return (await readAll()).length;
 }
@@ -184,29 +196,47 @@ async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
     const pair = `${entry.key}|${entry.queuedAt}`;
     try {
       if (entry.kind === 'create') {
+        // Jüngster lokaler Stand (P0-2): Der Entwurf kann aktueller sein als
+        // der Queue-Eintrag — App-Kill zwischen Entwurfs-Schreibung (400 ms)
+        // und dem nächsten Persist. Der Schlüssel ist sitzungsspezifisch
+        // (`new-…`), also gehört ein abweichender Entwurf zweifelsfrei zu
+        // genau diesem Eintrag; er gewinnt.
+        const draft = await readDraft(entry.key).catch(() => null);
+        const body = draft && (draft.heading !== entry.body.heading || draft.content !== entry.body.content || draft.tags !== entry.body.tags)
+          ? { heading: draft.heading, content: draft.content, tags: draft.tags }
+          : entry.body;
+        const effective: QueuedWrite = { ...entry, body };
         // Duplikatschutz: nur nach einem Fehlversuch prüfen (Antwort kann
         // verloren gegangen sein, obwohl der Server angelegt hat)
         if ((entry.attempts ?? 0) > 0) {
-          const existing = await findExistingCreate(client, entry);
+          const existing = await findExistingCreate(client, effective);
           if (existing != null) {
             createdIds.push(existing);
             await recordCreatedId(entry.key, existing);
+            await clearDraft(entry.key).catch(() => {});
             flushed++;
             processed.add(pair);
             continue;
           }
         }
         const res = await client.createNote({
-          heading: entry.body.heading || 'Ohne Titel',
-          content: entry.body.content,
+          heading: body.heading || 'Ohne Titel',
+          content: body.content,
           // Tatsächlichen Notiz-Typ durchreichen (Fallback 'note' für alte Einträge)
           type: entry.noteType ?? 'note',
-          tags: entry.body.tags,
+          tags: body.tags,
         });
         createdIds.push(res.note.id);
         // ID festhalten: Ein noch offener Editor übernimmt sie, statt die
         // Notiz beim nächsten Autosave ein zweites Mal anzulegen
         await recordCreatedId(entry.key, res.note.id, res.note.version);
+        // Eintrag SOFORT dauerhaft entfernen: Stirbt die App zwischen Server-
+        // Anlage und dem gesammelten Queue-Speichern am Ende des Flushs, läge
+        // der Create-Eintrag sonst wieder in der letzten Start-Queue — der
+        // nächste Flush würde die Notiz ein zweites Mal anlegen. Gleiches
+        // gilt für den zugehörigen lokalen Entwurf.
+        await removePair(pair);
+        await clearDraft(entry.key).catch(() => {});
       } else if (entry.kind === 'delete' && entry.noteId != null) {
         await client.deleteNote(entry.noteId);
       } else if (entry.kind === 'update' && entry.noteId != null) {

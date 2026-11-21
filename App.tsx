@@ -383,15 +383,17 @@ function AppInner() {
           // Logout: Client zurücksetzen, App-Group-Zugangsdaten und alle lokalen
           // Inhalte (Cache, Entwürfe, Offline-Queue) löschen — ein neues Konto
           // darf keine Daten des vorherigen sehen
-          onLoggedOut={() => {
+          onLoggedOut={async () => {
             setClient(null);
             setRoute({ name: 'list' });
             clearServerConfig();
-            // Widget zeigt sonst bis zu 1 h alte Daten mit ungueltigen Zugangen
+            // Widget zeigt sonst bis zu 1 h alte Daten mit ungueltigen Zugangsdaten
             reloadWidget();
-            // Lokale Inhalte (Cache, Entwürfe, Offline-Queue) loeschen, erst
-            // danach darf ein neues Konto Daten schreiben — daher awaited
-            clearAllLocalData().catch(() => {});
+            // Lokale Inhalte (Cache, Entwürfe, Offline-Queue, Anhänge) loeschen,
+            // erst danach darf ein neues Konto Daten schreiben — daher wirklich
+            // abgewartet und nicht nur angestossen (P0-5: kein Zeitfenster mit
+            // Restdaten des vorherigen Kontos)
+            await clearAllLocalData().catch(() => {});
           }}
           onOpenArchive={() => setRoute({ name: 'archive' })}
           onBack={() => setRoute({ name: 'list' })}
