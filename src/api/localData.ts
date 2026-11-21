@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { clearDataKey } from './secureStorage';
 import { clearOfflineAttachments } from './attachmentStore';
+import { clearUploadQueue } from './uploadQueue';
 
 /**
  * Kontotrennung: Alle lokal gespeicherten Inhalte der aktuellen Sitzung
@@ -23,6 +24,7 @@ const DATA_KEYS = [
   'pozume.drafts.v1',
   'pozume.list.prefs',
   'pozume.crashlog.v1',
+  'pozume.uploadQueue.v1',
 ];
 
 export async function clearAllLocalData(): Promise<void> {
@@ -33,8 +35,9 @@ export async function clearAllLocalData(): Promise<void> {
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();
   } catch {}
-  // Heruntergeladene Offline-Anhänge entfernen
+  // Heruntergeladene Offline-Anhänge und wartende Uploads entfernen
   await clearOfflineAttachments();
+  await clearUploadQueue();
   // Verschlüsselungsschlüssel verwerfen — ein neues Konto startet mit neuem Schlüssel
   await clearDataKey();
 }

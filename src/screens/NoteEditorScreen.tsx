@@ -14,6 +14,7 @@ import { setReminder, removeReminder } from '../api/reminders';
 import { enqueueWrite, removeWrite, takeCreatedId } from '../api/offlineQueue';
 import { saveDraft, readDraft, clearDraft, latestNewDraft, type Draft } from '../api/drafts';
 import { getOfflineAttachment, readOfflineAttachmentBytes, downloadAttachmentOffline, removeOfflineAttachment } from '../api/attachmentStore';
+import { enqueueUpload, uploadsFor, removeUpload } from '../api/uploadQueue';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin, pinRetryDelay } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
@@ -33,7 +34,7 @@ interface Props {
   /** Vorbelegung für neue Notizen (z.B. aus dem Teilen-Menü übernommen) */
   prefill?: { heading: string; content: string } | null;
   /** Datei, die nach dem ersten erfolgreichen Speichern als Anhang hochgeladen wird */
-  initialAttachment?: { uri: string; name?: string } | null;
+  initialAttachment?: { uri: string; name?: string; mimeType?: string } | null;
   /** Alle Notizen (für Notizlinks und Link-Auswahl) */
   allNotes?: Note[];
   onClose: () => void;
@@ -67,6 +68,13 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'dirty' | 'local' | 'queued' | 'failed' | 'conflict'>('idle');
   const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
   const [folderId, setFolderId] = useState<number | null>(note?.folder_id ?? null);
+  // Zielordner als Ref — persist/scheduleSave feuern in Timern mit älteren
+  // Closures. Bei neuen Notizen ist dies der VOR dem ersten Speichern gewählte
+  // Zielordner (P1-12): Er wandert mit ins createNote bzw. in die Offline-Queue.
+  const folderIdRef = useRef<number | null>(note?.folder_id ?? null);
+  folderIdRef.current = folderId;
+  // Anzeigename des gewählten Ordners (Chip-Label bei neuen Notizen)
+  const [pickedFolderName, setPickedFolderName] = useState<string | null>(null);
   const [favorite, setFavorite] = useState(!!note?.favorite);
   // Die Notizliste liefert keinen Inhalt — die volle Notiz muss nachgeladen werden,
   // bevor der Editor interaktiv wird (sonst überschreibt Autosave leeren Inhalt).
@@ -105,15 +113,50 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   // Initialer Anhang (z.B. aus dem Teilen-Menü): nach dem ersten erfolgreichen
   // persist hochladen und danach lokal verbrauchen — Fehler werden still übersprungen
   const initialAttachmentRef = useRef(initialAttachment ?? null);
+  /**
+   * Upload mit Duplikatschutz (P1-8): Kam der vorherige Versuch beim Server an,
+   * ging aber die Antwort verloren (Timeout), existiert der Anhang bereits —
+   * gleicher Name UND gleiche Größe. Liefert true, wenn die Datei (jetzt) auf
+   * dem Server liegt; bei Erfolg werden passende Einträge aus der dauerhaften
+   * Upload-Queue entfernt (manuelles Nachholen ersetzt das Warten auf den
+   * nächsten Flush).
+   */
+  const uploadWithDupCheck = async (
+    noteId: number,
+    file: { uri: string; name: string; mimeType?: string },
+  ): Promise<boolean> => {
+    const size = await FileSystem.getInfoAsync(file.uri)
+      .then((i: any) => (i?.exists ? (i.size ?? 0) : 0))
+      .catch(() => 0);
+    const list = (await client.listAttachments(noteId)).attachments ?? [];
+    // Name + Größe ist die beste verfügbare Signatur — Server hat keinen Idempotenz-Schlüssel
+    const duplicate = size > 0 && list.some((a) =>
+      (a.original_filename || a.filename) === file.name && a.file_size === size,
+    );
+    if (!duplicate) {
+      await client.uploadAttachment(noteId, { uri: file.uri, name: file.name, mimeType: file.mimeType });
+    }
+    for (const q of await uploadsFor(noteId)) {
+      if (q.name === file.name && q.size === size) await removeUpload(q.id);
+    }
+    return true;
+  };
   const uploadInitialAttachment = async () => {
     const file = initialAttachmentRef.current;
     if (!file || noteIdRef.current == null) return;
     // Vor dem Hochladen verbrauchen — ein erneuter persist lädt nicht nochmal
     initialAttachmentRef.current = null;
     try {
-      await client.uploadAttachment(noteIdRef.current, { uri: file.uri, name: file.name ?? 'anhang' });
-      const atts = await client.listAttachments(noteIdRef.current);
-      setAttachments(atts.attachments ?? []);
+      // Duplikatschutz: kam der Upload schon an (verlorene Antwort), nicht erneut
+      const uploaded = await uploadWithDupCheck(noteIdRef.current, {
+        uri: file.uri,
+        name: file.name ?? 'anhang',
+        mimeType: file.mimeType,
+      });
+      if (uploaded) {
+        const atts = await client.listAttachments(noteIdRef.current);
+        setAttachments(atts.attachments ?? []);
+      }
     } catch { /* still überspringen — der Editor darf nicht blockieren */ }
   };
 
@@ -159,6 +202,8 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           content: body.content,
           type: isDrawingContent(body.content) ? 'note' : 'markdown',
           tags: body.tags,
+          // Vor dem ersten Speichern gewählter Zielordner (P1-12 Share-Flow)
+          ...(folderIdRef.current != null ? { folder_id: folderIdRef.current } : {}),
         });
         noteIdRef.current = res.note.id;
         setNoteId(res.note.id);
@@ -217,8 +262,12 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           body,
           if_version: versionRef.current,
           // Typ wie beim Online-Create mitliefern — sonst legt der Queue-Flush
-          // Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an
-          ...(noteIdRef.current == null ? { noteType: isDrawingContent(body.content) ? 'note' : 'markdown' } : {}),
+          // Zeichnungen als 'note' statt 'markdown' (oder umgekehrt) an; ebenso
+          // den vor dem ersten Speichern gewählten Zielordner (P1-12)
+          ...(noteIdRef.current == null ? {
+            noteType: isDrawingContent(body.content) ? 'note' : 'markdown',
+            ...(folderIdRef.current != null ? { folderId: folderIdRef.current } : {}),
+          } : {}),
         }).catch(() => {});
         // Der Stand liegt jetzt dauerhaft in der Queue — der zugehörige Entwurf
         // ist verbraucht (verwaiste new-…-Entwürfe würden sich sonst ansammeln;
@@ -300,10 +349,17 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     scheduleSave();
   };
 
-  const openNoteByTitle = (title: string) => {
-    if (!allNotes || !onOpenNote) return;
-    const target = allNotes.find((n) => (n.heading ?? '').toLowerCase() === title.toLowerCase());
-    if (target) onOpenNote(target);
+  const openNoteByTitle = async (title: string) => {
+    if (!onOpenNote) return;
+    const target = (allNotes ?? []).find((n) => (n.heading ?? '').toLowerCase() === title.toLowerCase());
+    if (target) { onOpenNote(target); return; }
+    // Notiz wurde (wegen Begrenzung, P1-14) nicht in die lokalen Notizen
+    // geladen — auf dem Server nach dem Titel suchen statt still zu scheitern
+    try {
+      const res = await client.searchNotes(title, { limit: 5 });
+      const hit = res.notes.find((n) => (n.heading ?? '').toLowerCase() === title.toLowerCase());
+      if (hit) onOpenNote(hit);
+    } catch {}
   };
 
   const openNoteById = (id: number) => {
@@ -639,6 +695,16 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
         setOfflineAtts(new Set(local));
       })
       .catch(() => {});
+    // Wartende Uploads aus der letzten Sitzung (offline fehlgeschlagen): als
+    // Banner anbieten — sofortiges manuelles Wiederholen möglich; ohne Retry
+    // zieht die Wiederverbindung die Queue nach (P1-8)
+    uploadsFor(note.id)
+      .then((list) => {
+        if (list.length === 0) return;
+        const last = list[list.length - 1];
+        setFailedUpload({ uri: last.localPath, name: last.name, mimeType: last.mimeType });
+      })
+      .catch(() => {});
     // Vorhandene Tags einmalig laden — Vorschläge unter dem Tag-Feld
     client.listTags()
       .then((r) => setTagSuggestions((r.tags ?? []).map((x) => x.tag).slice(0, 30)))
@@ -947,16 +1013,35 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     setUploading(true);
     setFailedUpload(null);
     try {
-      await client.uploadAttachment(noteId, file);
-      const atts = await client.listAttachments(noteId);
-      setAttachments(atts.attachments ?? []);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('🪶', t('editor.uploaded'));
+      // Duplikatschutz + Nachholen wartender Uploads derselben Datei —
+      // die dauerhafte Upload-Queue wird von uploadWithDupCheck mitgeleert
+      const uploaded = await uploadWithDupCheck(noteId, file);
+      if (uploaded) {
+        const atts = await client.listAttachments(noteId);
+        setAttachments(atts.attachments ?? []);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('🪶', t('editor.uploaded'));
+      }
     } catch (e: any) {
-      // Fehlgeschlagenen Upload merken — die Datei liegt noch lokal und kann
-      // mit einem Tipp wiederholt werden (kein erneutes Suchen nötig)
-      setFailedUpload(file);
-      Alert.alert(t('editor.uploadFailed'), e?.message ?? String(e));
+      if (e?.status === 0) {
+        // Offline: Upload dauerhaft einreihen — die Datei wird aus dem
+        // Cache-Verzeichnis (iOS räumt es auf) in ein dauerhaftes Verzeichnis
+        // kopiert. Der Banner bietet sofortiges Wiederholen; ohne Retry zieht
+        // die Wiederverbindung die Queue nach (P1-8).
+        const queued = await enqueueUpload(noteId, file);
+        if (queued) {
+          setFailedUpload({ uri: queued.localPath, name: file.name, mimeType: file.mimeType });
+          Alert.alert('📴 ' + t('editor.uploadFailed'), t('editor.uploadQueued'));
+        } else {
+          setFailedUpload(file);
+          Alert.alert(t('editor.uploadFailed'), e?.message ?? String(e));
+        }
+      } else {
+        // Fehlgeschlagener Upload merken — die Datei liegt noch lokal und kann
+        // mit einem Tipp wiederholt werden (kein erneutes Suchen nötig)
+        setFailedUpload(file);
+        Alert.alert(t('editor.uploadFailed'), e?.message ?? String(e));
+      }
     } finally {
       setUploading(false);
     }
@@ -1112,9 +1197,16 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     ]);
   };
 
-  const moveToFolder = async (targetId: number | null) => {
+  const moveToFolder = async (targetId: number | null, folderName?: string) => {
     setShowPicker(false);
-    if (noteId == null) return;
+    if (noteId == null) {
+      // Neue Notiz (z.B. Share-Inhalt): Zielordner VOR dem ersten Speichern
+      // wählen (P1-12) — er wird beim ersten persist mit createNote übernommen
+      // bzw. in die Offline-Queue gelegt, ein Server-Kontakt ist vorher unnötig.
+      setFolderId(targetId);
+      setPickedFolderName(targetId == null ? null : (folderName ?? null));
+      return;
+    }
     try {
       await client.updateNote(noteId, { folder_id: targetId });
       setFolderId(targetId);
@@ -1315,6 +1407,10 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
         </ScrollView>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.actionRow} contentContainerStyle={styles.actionRowContent}>
+          <TouchableOpacity style={styles.actionChip} onPress={() => setShowPicker(true)}>
+            <Text style={styles.actionChipIcon}>📁</Text>
+            <Text style={styles.actionChipText} numberOfLines={1}>{pickedFolderName ?? t('editor.moveFolder')}</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.actionChip} onPress={openTemplates}>
             <Text style={styles.actionChipIcon}>📋</Text>
             <Text style={styles.actionChipText}>{t('templates.apply')}</Text>

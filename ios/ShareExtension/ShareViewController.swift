@@ -2,8 +2,8 @@ import UIKit
 import UniformTypeIdentifiers
 
 /**
- * Share-Extension: empfängt eine URL, Text oder ein Bild aus dem Teilen-Menü
- * (z.B. Safari, Fotos) und legt ihn in der App Group als "ausstehenden Share"
+ * Share-Extension: empfängt eine URL, Text, ein Bild oder eine Datei (z.B.
+ * PDF) aus dem Teilen-Menü und legt ihn in der App Group als "ausstehenden Share"
  * ab — als Queue (JSON-Array, max. 20 Einträge), damit mehrere Shares hintere-
  *inander nicht verloren gehen. Die Haupt-App übernimmt die Einträge beim
  * nächsten Start und öffnet den Editor mit Vorbelegung — Zielordner und Tags
@@ -23,6 +23,12 @@ class ShareViewController: UIViewController {
   private var sharedTitle: String = ""
   /// Dateiname (ohne Verzeichnis) eines geteilten Bildes in SharedAttachments/.
   private var sharedImagePath: String = ""
+  /// Dateiname (ohne Verzeichnis) einer geteilten DATEI (z.B. PDF) in SharedAttachments/.
+  private var sharedFilePath: String = ""
+  /// Ursprünglicher Anzeigename der geteilten Datei (für Überschrift und Anhang).
+  private var sharedFileName: String = ""
+  /// Bestmöglich bestimmter MIME-Typ der Datei — für den späteren Anhang-Upload.
+  private var sharedMimeType: String = ""
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -142,8 +148,89 @@ class ShareViewController: UIViewController {
             DispatchQueue.main.async { self.updatePreview() }
           }
         }
+        // Variante 5: Dateien (z.B. PDF, ZIP) — alles, was weder URL, Text,
+        // Property-List noch Bild ist. NSItemProvider liefert Dateien
+        // typischerweise als Datei-NSURL; die Datei wird wie das Bild in
+        // SharedAttachments/ kopiert. Die Haupt-App übernimmt sie beim nächsten
+        // Start als initialen Anhang (Editor) und lädt sie hoch (P1-12).
+        let nonFileTypes = [
+          UTType.url.identifier,
+          UTType.plainText.identifier,
+          UTType.image.identifier,
+          UTType.propertyList.identifier,
+        ]
+        // Konformitäts-Check zuerst: ein Bild registriert z.B. "public.jpeg",
+        // nicht "public.image" — nur der String-Vergleich würde es fälschlich
+        // als Datei behandeln. hasItemConformingToTypeIdentifier löst Untertypen auf.
+        if !provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
+           !provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
+           !provider.hasItemConformingToTypeIdentifier(UTType.image.identifier),
+           !provider.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier),
+           let typeIdentifier = provider.registeredTypeIdentifiers.first(where: { !nonFileTypes.contains($0) }) {
+          provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { data, error in
+            if let error = error {
+              print("[ShareExtension] Datei laden fehlgeschlagen: \(error.localizedDescription)")
+              return
+            }
+            // Nur echte lokale Dateien behandeln — Web-URLs und Text sind
+            // bereits über die Varianten 1–4 abgedeckt; NSData-Blobs ohne
+            // file-Schema wären sonst Datenmüll.
+            let fileUrl: URL?
+            if let direct = data as? URL {
+              fileUrl = direct
+            } else if let nsData = data as? NSData,
+                      let fromData = URL(dataRepresentation: nsData as Data, relativeTo: nil),
+                      fromData.scheme == "file" {
+              fileUrl = fromData
+            } else {
+              fileUrl = nil
+            }
+            guard let fileUrl = fileUrl, fileUrl.scheme == "file" else { return }
+            guard let saved = self.saveSharedFile(at: fileUrl, provider: provider) else { return }
+            self.sharedFilePath = saved.storedName
+            self.sharedFileName = saved.displayName
+            self.sharedMimeType = Self.mimeType(forExtension: fileUrl.pathExtension, typeIdentifier: typeIdentifier)
+            DispatchQueue.main.async { self.updatePreview() }
+          }
+        }
       }
     }
+  }
+
+  // MARK: - Datei in der App Group ablegen
+
+  /**
+   * Kopiert die geteilte Datei unter <appgroup-container>/SharedAttachments/
+   * mit UUID-Namen und Original-Endung.
+   * @returns gespeicherter Name (ohne Verzeichnis) und Original-Name oder nil bei Fehler.
+   */
+  private func saveSharedFile(at sourceUrl: URL, provider: NSItemProvider) -> (storedName: String, displayName: String)? {
+    guard let groupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.de.inthielligent.pozume") else {
+      return nil
+    }
+    let dir = groupUrl.appendingPathComponent("SharedAttachments", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+      let ext = sourceUrl.pathExtension.isEmpty ? "" : "." + sourceUrl.pathExtension.lowercased()
+      let storedName = UUID().uuidString + ext
+      try FileManager.default.copyItem(at: sourceUrl, to: dir.appendingPathComponent(storedName))
+      let displayName = provider.suggestedName ?? sourceUrl.lastPathComponent
+      return (storedName, displayName)
+    } catch {
+      print("[ShareExtension] Datei speichern fehlgeschlagen: \(error.localizedDescription)")
+      return nil
+    }
+  }
+
+  /** Besten verfügbaren MIME-Typ bestimmen (Endung, sonst registrierter Typ-Bezeichner). */
+  private static func mimeType(forExtension ext: String, typeIdentifier: String) -> String {
+    if !ext.isEmpty, let type = UTType(filenameExtension: ext), let mime = type.preferredMIMEType {
+      return mime
+    }
+    if let type = UTType(typeIdentifier), let mime = type.preferredMIMEType {
+      return mime
+    }
+    return "application/octet-stream"
   }
 
   // MARK: - Bild in der App Group ablegen
@@ -184,11 +271,12 @@ class ShareViewController: UIViewController {
     return "jpg"
   }
 
-  /** Vorschau-Label mit Titel, URL, Text und Bild-Hinweis des geteilten Inhalts aktualisieren. */
+  /** Vorschau-Label mit Titel, URL, Text und Bild-/Datei-Hinweis des geteilten Inhalts aktualisieren. */
   private func updatePreview() {
     let heading = sharedTitle.isEmpty ? "Geteilt" : sharedTitle
     var lines = [heading, sharedUrl, sharedText].filter { !$0.isEmpty }
     if !sharedImagePath.isEmpty { lines.append("📷 Bild angehängt") }
+    if !sharedFilePath.isEmpty { lines.append("📎 \(sharedFileName)") }
     previewLabel.text = lines.joined(separator: "\n")
   }
 
@@ -264,9 +352,13 @@ class ShareViewController: UIViewController {
    * und Tags vor dem Speichern wählen.
    */
   @objc private func saveTapped() {
-    // Überschrift: Seitentitel, sonst URL-Anfang, sonst Fallback
+    // Überschrift: Seitentitel, sonst URL-Anfang, sonst Dateiname, sonst Fallback
     let heading = sharedTitle.isEmpty
-      ? (sharedUrl.isEmpty ? (sharedImagePath.isEmpty ? "Geteilte Notiz" : "Geteiltes Bild") : String(sharedUrl.prefix(60)))
+      ? (sharedUrl.isEmpty
+          ? (sharedImagePath.isEmpty
+              ? (sharedFilePath.isEmpty ? "Geteilte Notiz" : sharedFileName)
+              : "Geteiltes Bild")
+          : String(sharedUrl.prefix(60)))
       : sharedTitle
     // Inhalt: URL als Markdown-Link, darunter der geteilte Text
     var content = ""
@@ -278,12 +370,13 @@ class ShareViewController: UIViewController {
     if !sharedText.isEmpty {
       content += sharedText
     }
-    if content.isEmpty && sharedImagePath.isEmpty {
+    if content.isEmpty && sharedImagePath.isEmpty && sharedFilePath.isEmpty {
       statusLabel.text = "Nichts zu übernehmen."
       return
     }
 
-    // Neuer Queue-Eintrag: ts (Unix-Sekunden), heading, content, imagePath nur bei Bild
+    // Neuer Queue-Eintrag: ts (Unix-Sekunden), heading, content, imagePath nur
+    // bei Bild, filePath/fileName/fileType nur bei Datei
     var entry: [String: Any] = [
       "ts": Int(Date().timeIntervalSince1970),
       "heading": heading,
@@ -291,6 +384,11 @@ class ShareViewController: UIViewController {
     ]
     if !sharedImagePath.isEmpty {
       entry["imagePath"] = sharedImagePath
+    }
+    if !sharedFilePath.isEmpty {
+      entry["filePath"] = sharedFilePath
+      entry["fileName"] = sharedFileName
+      entry["fileType"] = sharedMimeType
     }
 
     guard let group = UserDefaults(suiteName: "group.de.inthielligent.pozume") else {

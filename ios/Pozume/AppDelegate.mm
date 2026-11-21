@@ -42,6 +42,18 @@
 
 @end
 
+// Datenschutz-Overlay (P1-15): iOS erstellt den Snapshot für die App-Wechsel-
+// Vorschau, bevor die JS-Seite reagieren kann — der RN-State-Wechsel auf
+// LockScreen ist dafür kein gleichwertiger Ersatz. Der Overlay verdeckt den
+// Inhalt daher NATIV bei jeder Deaktivierung (App-Wechsler, Kontrollzentrum,
+// Benachrichtigungsansicht) — auch bei "inactive" ohne background-Wechsel —
+// und wird beim wieder Aktivieren entfernt. Nur aktiv, wenn der Nutzer die
+// App-Sperre eingeschaltet hat (Flag "pozume.appLock" in der App Group –
+// genau wie Widget und Share-Extension lesbar).
+@interface AppDelegate ()
+@property (nonatomic, strong) UIView *privacyOverlay;
+@end
+
 @implementation AppDelegate
 
 - (UISceneConfiguration *)application:(UIApplication *)application
@@ -62,7 +74,59 @@
   // They will be passed down to the ViewController used by React Native.
   self.initialProps = @{};
 
+  // Datenschutz-Overlay ein-/ausblenden (siehe Kommentar am @interface oben):
+  // willResignActive feuert auch für Kontrollzentrum/Benachrichtigungsansicht,
+  // also immer dann, wenn das System einen Standbild-Snapshot nehmen könnte.
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(handleWillResignActive:)
+                                               name:UIApplicationWillResignActiveNotification
+                                             object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(handleDidBecomeActive:)
+                                               name:UIApplicationDidBecomeActiveNotification
+                                             object:nil];
+
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
+}
+
+/** App-Sperre aktiv? Flag in der App Group – die JS-Seite schreibt es bei Boot und Toggle. */
+- (BOOL)appLockEnabled
+{
+  NSUserDefaults *group = [[NSUserDefaults alloc] initWithSuiteName:@"group.de.inthielligent.pozume"];
+  NSString *flag = [group stringForKey:@"pozume.appLock"];
+  return flag != nil && [flag isEqualToString:@"1"];
+}
+
+/** Inhalt verdecken: Overlay über das Fenster legen (P1-15). */
+- (void)handleWillResignActive:(NSNotification *)notification
+{
+  if (![self appLockEnabled]) return;
+  UIWindow *window = self.window;
+  if (window == nil) return;
+  if (self.privacyOverlay == nil) {
+    UIView *overlay = [[UIView alloc] init];
+    overlay.backgroundColor = [UIColor systemBackgroundColor];
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    UILabel *label = [[UILabel alloc] init];
+    label.text = @"🪶 Pozume";
+    label.textColor = [UIColor secondaryLabelColor];
+    label.font = [UIFont boldSystemFontOfSize:22];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [overlay addSubview:label];
+    [label.centerXAnchor constraintEqualToAnchor:overlay.centerXAnchor].active = YES;
+    [label.centerYAnchor constraintEqualToAnchor:overlay.centerYAnchor].active = YES;
+
+    self.privacyOverlay = overlay;
+  }
+  self.privacyOverlay.frame = window.bounds;
+  [window addSubview:self.privacyOverlay];
+}
+
+/** Inhalt wieder freigeben: Overlay entfernen (Nachricht an nil ist erlaubt). */
+- (void)handleDidBecomeActive:(NSNotification *)notification
+{
+  [self.privacyOverlay removeFromSuperview];
 }
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge

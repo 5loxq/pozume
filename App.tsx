@@ -19,6 +19,8 @@ import KanbanScreen from './src/screens/KanbanScreen';
 import { PoznoteClient, type Note } from './src/api';
 import { loadServer, getAppLock, saveServer } from './src/api/store';
 import { flushQueue, queueSize } from './src/api/offlineQueue';
+import { processUploadQueue, uploadQueueSize } from './src/api/uploadQueue';
+import NetInfo from '@react-native-community/netinfo';
 import { clearAllLocalData } from './src/api/localData';
 // App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
 import { saveServerConfig, clearServerConfig, readValue, removeValue, saveValue,
@@ -30,7 +32,7 @@ import { usePalette, loadThemeOverride, onThemeChange } from './src/theme';
 
 type Route =
   | { name: 'list' }
-  | { name: 'editor'; note: Note | null; drawing?: boolean; prefill?: { heading: string; content: string } | null; initialAttachment?: { uri: string; name?: string } | null }
+  | { name: 'editor'; note: Note | null; drawing?: boolean; prefill?: { heading: string; content: string } | null; initialAttachment?: { uri: string; name?: string; mimeType?: string } | null }
   | { name: 'folders' }
   | { name: 'folderNotes'; folderId: number; folderName: string }
   | { name: 'trash' }
@@ -89,7 +91,10 @@ function AppInner() {
           const lockOn = await getAppLock();
           lockEnabledRef.current = lockOn;
           setLocked(lockOn);
-          c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+          // App-Lock-Zustand in die App Group: Der native Datenschutz-Overlay in
+          // AppDelegate.mm (P1-15) verdeckt Inhalte nur bei aktivierter Sperre.
+          saveValue('pozume.appLock', lockOn ? '1' : '0');
+          loadAllNotes(c);
           // Widget + Share-Extension brauchen die Zugangsdaten aus der App Group
           saveServerConfig(stored);
           // Geteilte Inhalte aus der Share-Extension uebernehmen
@@ -117,7 +122,7 @@ function AppInner() {
     saveServerConfig(c.cfg);
     // Widget hat jetzt gueltige Zugangsdaten -> sofort aktualisieren
     reloadWidget();
-    c.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+    loadAllNotes(c);
   }, []);
 
   /**
@@ -141,10 +146,22 @@ function AppInner() {
       if (rest.length > 0) saveValue('pozume.pendingShare', JSON.stringify(rest));
       else removeValue('pozume.pendingShare');
       if (newest && typeof newest.heading === 'string' && typeof newest.content === 'string') {
-        let initialAttachment: { uri: string; name?: string } | null = null;
+        let initialAttachment: { uri: string; name?: string; mimeType?: string } | null = null;
         if (typeof newest.imagePath === 'string' && newest.imagePath) {
           const copied = exportSharedAttachment(newest.imagePath);
           if (copied) initialAttachment = { uri: copied, name: newest.imagePath };
+        }
+        // Geteilte Datei (z.B. PDF) — analog zum Bild aus der App Group in den
+        // Cache kopieren und dem Editor als initialen Anhang mitgeben (P1-12)
+        if (initialAttachment == null && typeof newest.filePath === 'string' && newest.filePath) {
+          const copied = exportSharedAttachment(newest.filePath);
+          if (copied) {
+            initialAttachment = {
+              uri: copied,
+              name: typeof newest.fileName === 'string' && newest.fileName ? newest.fileName : newest.filePath,
+              ...(typeof newest.fileType === 'string' && newest.fileType ? { mimeType: newest.fileType } : {}),
+            };
+          }
         }
         setRoute({ name: 'editor', note: null, prefill: { heading: newest.heading, content: newest.content }, initialAttachment });
       }
@@ -159,7 +176,7 @@ function AppInner() {
   const onSaved = useCallback(() => {
     setDataVersion((v) => v + 1);
     reloadWidget();
-    client?.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+    if (client) loadAllNotes(client);
   }, [client]);
   const onDeleted = useCallback(() => {
     setDataVersion((v) => v + 1);
@@ -171,25 +188,65 @@ function AppInner() {
     // Hintergrund; Deaktivieren entsperrt sofort.
     lockEnabledRef.current = enabled;
     if (!enabled) setLocked(false);
+    // Flag in die App Group spiegeln — der native Overlay (AppDelegate, P1-15)
+    // verdeckt die Vorschau nur bei aktiver Sperre
+    saveValue('pozume.appLock', enabled ? '1' : '0');
   }, []);
 
-  // Offline-Queue: beim Start und bei Rückkehr in den Vordergrund abarbeiten
+  /**
+   * Alle Notizen paginiert laden (P1-14): Für Notizlinks, Link-Picker und
+   * Titel-Auflösung — mit Obergrenze, damit große Sammlungen weder lange
+   * Startzeiten noch unbegrenzten RAM/Netzverkehr verursachen. Ältere, nicht
+   * geladene Notizen findet die Titel-Verknüpfung über die Server-Suche
+   * (openNoteByTitle-Fallback im Editor).
+   */
+  const loadAllNotes = useCallback(async (c: PoznoteClient) => {
+    const PAGE = 100;
+    const MAX = 1000;
+    try {
+      const out: Note[] = [];
+      let offset = 0;
+      let total: number | undefined;
+      while (out.length < MAX && out.length < (total ?? Infinity)) {
+        const r = await c.listNotes({ limit: PAGE, offset });
+        const page = r.notes ?? [];
+        if (page.length === 0) break;
+        out.push(...page);
+        total = r.total;
+        offset += PAGE;
+      }
+      setAllNotes(out.slice(0, MAX));
+    } catch {}
+  }, []);
+
+  // Offline-Queue: beim Start, bei Rückkehr in den Vordergrund und bei
+  // Wiederverbindung abarbeiten
   const flushOffline = useCallback(async () => {
     if (!client) return;
     try {
-      if ((await queueSize()) === 0) return;
+      if ((await queueSize()) === 0 && (await uploadQueueSize()) === 0) return;
       const res = await flushQueue(client);
-      if (res.flushed > 0) {
+      // Wartende Anhänge still nachziehen (P1-8) — der Editor hat sie beim
+      // Fehlschlag bereits gemeldet; die Liste aktualisiert sich mit
+      const uploads = await processUploadQueue(client).catch(() => null);
+      if (res.flushed > 0 || (uploads?.uploaded ?? 0) > 0) {
         setDataVersion((v) => v + 1);
-        client.listNotes().then((r) => setAllNotes(r.notes ?? [])).catch(() => {});
+        loadAllNotes(client);
+      }
+      if (res.flushed > 0) {
         Alert.alert('🪶', t('offline.flushed', { n: res.flushed }));
+      }
+      // Vom Server endgültig abgelehnte Uploads: Datei liegt weiterhin in der
+      // Quelle des Nutzers — hier nur melden, dass sie verworfen wurde
+      if ((uploads?.dropped ?? 0) > 0) {
+        Alert.alert(t('common.error'), t('offline.uploadsDropped', { n: uploads!.dropped }));
       }
       // Konflikte: Offline-Fassungen liegen als Entwurf in den Notizen bereit
       if (res.conflicts.length > 0) {
         Alert.alert(t('offline.conflictTitle'), t('offline.conflictText', { n: res.conflicts.length }));
       }
     } catch {}
-  }, [client]);
+  }, [client, loadAllNotes]);
 
   useEffect(() => { flushOffline(); }, [flushOffline]);
 
@@ -204,6 +261,17 @@ function AppInner() {
       }
     });
     return () => sub.remove();
+  }, [flushOffline]);
+
+  // Wiederverbindung (P1-7): Kehrt die Verbindung zurück, während die App
+  // durchgehend im Vordergrund bleibt (Flugmodus im Kontrollzentrum,
+  // Netzwechsel), feuert kein AppState-Wechsel — NetInfo meldet genau diesen
+  // Fall und stößt denselben Flush an. Ist nichts offen, bricht er sofort ab.
+  useEffect(() => {
+    const sub = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) flushOffline();
+    });
+    return () => sub();
   }, [flushOffline]);
 
   if (booting) {

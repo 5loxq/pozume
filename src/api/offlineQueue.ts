@@ -39,6 +39,8 @@ export interface QueuedWrite {
   if_version?: string;
   /** Notiz-Typ (Note.type, z.B. 'markdown') — wird beim Create an den Server durchgereicht */
   noteType?: string;
+  /** Zielordner des Creates — offline angelegte Notizen landen im gewählten Ordner (P1-12) */
+  folderId?: number;
   /** Fehlversuche (Netzwerk) — ab 1 wird vor Create-Wiederholung auf Duplikate geprüft */
   attempts?: number;
   queuedAt: number;
@@ -225,6 +227,8 @@ async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
           // Tatsächlichen Notiz-Typ durchreichen (Fallback 'note' für alte Einträge)
           type: entry.noteType ?? 'note',
           tags: body.tags,
+          // Offline gewählter Zielordner mitgeben (P1-9/P1-12)
+          ...(entry.folderId != null ? { folder_id: entry.folderId } : {}),
         });
         createdIds.push(res.note.id);
         // ID festhalten: Ein noch offener Editor übernimmt sie, statt die
