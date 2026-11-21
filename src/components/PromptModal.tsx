@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Modal, KeyboardAvoidingView, Platform } from 'react-native';
-import { usePalette, spacing, radius, typeFor, shadow, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadow, primaryButtonFor,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -26,15 +26,21 @@ export default function PromptModal({
 }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
   const [value, setValue] = useState(defaultValue);
   const inputRef = useRef<TextInput>(null);
+  const focusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible) {
       setValue(defaultValue);
-      setTimeout(() => inputRef.current?.focus(), 80);
+      if (focusTimer.current) clearTimeout(focusTimer.current);
+      focusTimer.current = setTimeout(() => inputRef.current?.focus(), 80);
     }
+    return () => {
+      if (focusTimer.current) clearTimeout(focusTimer.current);
+    };
   }, [visible, defaultValue]);
 
   const submit = () => {
@@ -95,6 +101,6 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
   },
   cancelText: { color: colors.textMuted, fontWeight: '700' },
-  okBtn: { ...primaryButton, flex: 1, paddingVertical: 13 },
+  okBtn: { ...primaryButtonFor(colors), flex: 1, paddingVertical: 13 },
   okText: { color: '#fff', fontWeight: '700' },
 });

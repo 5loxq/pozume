@@ -3,7 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { usePalette, spacing, radius, typeFor, shadow, Palette } from '../theme';
-import { t } from '../i18n';
+import { t, getLocale } from '../i18n';
 import type { PoznoteClient, Note } from '../api';
 import { extractTasks, type Task } from '../utils';
 import PromptModal from '../components/PromptModal';
@@ -223,7 +223,7 @@ export default function TasksScreen({ client, onOpenNote, onBack }: Props) {
     if (!dueAt) return null;
     const d = new Date(dueAt.includes('T') ? dueAt : dueAt + 'T00:00:00');
     if (isNaN(d.getTime())) return null;
-    const dateStr = d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' });
+    const dateStr = d.toLocaleDateString(getLocale(), { day: '2-digit', month: 'short' });
     // Überfällig = vor heute (heutige Fälligkeit ist noch nicht überfällig)
     const today = new Date();
     today.setHours(0, 0, 0, 0);

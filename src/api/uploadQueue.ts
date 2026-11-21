@@ -122,7 +122,8 @@ async function alreadyUploaded(
     const list = res.attachments ?? [];
     return list.some((a) =>
       (a.original_filename || a.filename) === entry.name &&
-      entry.size > 0 && a.file_size === entry.size,
+      // size 0 = Größe unbekannt (getInfoAsync fehlgeschlagen): nur der Name zählt
+      (entry.size === 0 || a.file_size === entry.size),
     );
   } catch {
     return false;
@@ -153,7 +154,25 @@ export interface UploadFlushResult {
  * App-Kill danach kann denselben Upload nicht erneut anstoßen (kein Fenster
  * wie beim gesammelten Speichern am Ende).
  */
+/**
+ * In-Flight-Schutz: processUploadQueue wird beim App-Start, bei jedem
+ * AppState-Wechsel und bei jedem NetInfo-Reconnect aufgerufen — ohne Flag
+ * würden parallele Aufrufe dieselbe Queue lesen und denselben Eintrag doppelt
+ * hochladen (der Duplikatschutz greift nicht, weil beide vor dem Upload prüfen).
+ */
+let processing = false;
+
 export async function processUploadQueue(client: PoznoteClient): Promise<UploadFlushResult> {
+  if (processing) return { uploaded: 0, dropped: 0, failed: false };
+  processing = true;
+  try {
+    return await processUploadQueueInner(client);
+  } finally {
+    processing = false;
+  }
+}
+
+async function processUploadQueueInner(client: PoznoteClient): Promise<UploadFlushResult> {
   const q = (await readAll()).sort((a, b) => a.queuedAt - b.queuedAt);
   let uploaded = 0;
   let dropped = 0;
@@ -178,14 +197,10 @@ export async function processUploadQueue(client: PoznoteClient): Promise<UploadF
         }
         continue;
       }
-      // Netzwerkfehler: Versuch zählen und abbrechen — Reihenfolge und Rest
-      // der Queue bleiben unverändert im Speicher
+      // Netzwerkfehler: nur Versuch zählen und abbrechen — der Eintrag bleibt
+      // dauerhaft in der Queue (inkl. lokaler Datei), ein Offline-Flush darf
+      // keinen Anhang verwerfen. Reihenfolge und Rest bleiben unverändert.
       await bumpAttempts(entry.id);
-      if ((entry.attempts ?? 0) + 1 >= MAX_ATTEMPTS) {
-        dropped++;
-        await removeUpload(entry.id);
-        continue;
-      }
       return { uploaded, dropped, failed: true };
     }
   }

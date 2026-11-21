@@ -19,6 +19,7 @@ export interface Note {
   favorite?: boolean;
   pinned?: boolean;
   updated_at?: string;
+  created_at?: string;
   type?: string;
   locked?: boolean;
   workspace?: string;
@@ -128,6 +129,7 @@ function normalizeNote(raw: any): Note {
   return {
     ...raw,
     updated_at: toIsoDateTime(raw?.updated ?? raw?.updated_at),
+    created_at: toIsoDateTime(raw?.created ?? raw?.created_at),
     favorite: !!raw?.favorite,
     pinned: !!raw?.pinned,
   };
@@ -261,7 +263,15 @@ export class PoznoteClient {
       throw new PoznoteError(res.status, `HTTP ${res.status}: ${detail}`, data);
     }
     this.assertSameOrigin(res);
-    return res.json() as Promise<T>;
+    // Leerer/ungültiger Body (z.B. 204 oder HTML-Fehlerseite mit 200) darf keinen
+    // rohen SyntaxError werfen — Aufrufer erwarten einen PoznoteError mit status
+    const text = await res.text().catch(() => '');
+    if (!text) return {} as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      return {} as T;
+    }
   }
 
   /**

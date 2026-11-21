@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { usePalette, spacing, radius, typeFor, shadow,
   Palette, saveThemeOverride, getThemeMode, type ThemeMode,
 } from '../theme';
-import { t, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
+import { t, getLocale, loadLocaleOverride, saveLocaleOverride, type LocaleMode } from '../i18n';
 import type { PoznoteClient } from '../api';
 import { setAppLock, clearServer, getAppLock } from '../api/store';
 import { queueSize } from '../api/offlineQueue';
@@ -96,7 +96,7 @@ export default function SettingsScreen({ client, onLockChange, onLoggedOut, onOp
       return;
     }
     const body = entries.slice(0, 5).map((e) =>
-      `${new Date(e.t).toLocaleString('de-DE')}${e.fatal ? ' ⚠' : ''}: ${e.message}`).join('\n\n');
+      `${new Date(e.t).toLocaleString(getLocale())}${e.fatal ? ' ⚠' : ''}: ${e.message}`).join('\n\n');
     Alert.alert(t('settings.crashLog'), body, [
       { text: t('common.close'), style: 'cancel' },
       { text: t('settings.crashClear'), style: 'destructive', onPress: async () => { await clearCrashLog(); setCrashCount(0); } },

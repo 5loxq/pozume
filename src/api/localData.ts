@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import { clearDataKey } from './secureStorage';
 import { clearOfflineAttachments } from './attachmentStore';
@@ -11,8 +12,8 @@ import { clearUploadQueue } from './uploadQueue';
  * damit ein neues Konto niemals Notizen, Suchtreffer oder Anhänge des
  * vorherigen sieht.
  *
- * Geräte-Einstellungen (Sprache, Theme) bleiben erhalten — sie enthalten
- * keine Kontodaten.
+ * Geräte-Einstellungen (Sprache, Theme, Listen-Präferenz Sortierung/Filter)
+ * bleiben erhalten — sie enthalten keine Kontodaten.
  */
 const DATA_KEYS = [
   'pozume.cache.notes.v1',
@@ -22,14 +23,23 @@ const DATA_KEYS = [
   'pozume.createdIds.v1',
   'pozume.reminders.v1',
   'pozume.drafts.v1',
-  'pozume.list.prefs',
   'pozume.crashlog.v1',
   'pozume.uploadQueue.v1',
+  'pozume.attachments.v1',
+];
+
+/** SecureStore-Keys mit Konto-Bezug (Notiz-Sperren des alten Kontos) */
+const SECURE_DATA_KEYS = [
+  'pozume.noteLock.locked', // Notiz-IDs — kollidieren sonst mit IDs des neuen Kontos
+  'pozume.noteLock.retry.all', // globaler Fehlversuch-Zähler
 ];
 
 export async function clearAllLocalData(): Promise<void> {
   try {
     await AsyncStorage.multiRemove(DATA_KEYS);
+  } catch {}
+  try {
+    for (const k of SECURE_DATA_KEYS) await SecureStore.deleteItemAsync(k);
   } catch {}
   // Geplante lokale Erinnerungen stornieren (gehören zum Konto-Inhalt)
   try {

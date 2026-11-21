@@ -48,6 +48,9 @@ enum KeychainStore {
       kSecAttrService as String: keychainService,
       kSecAttrAccount as String: keychainAccount,
       kSecAttrAccessGroup as String: accessGroup,
+      // Muss identisch zur Schreib-Query der Haupt-App sein (kSecUseDataProtectionKeychain),
+      // sonst wird das Item je nach SDK-Default nicht gefunden
+      kSecUseDataProtectionKeychain as String: true,
       kSecReturnData as String: true,
       kSecMatchLimit as String: kSecMatchLimitOne,
     ]

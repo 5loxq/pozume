@@ -133,6 +133,9 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   // Sequenz-Schutz für load(): überlappende Aufrufe können sonst eine alte
   // Antwort die neuere überschreiben lassen — nur die jüngste Anfrage gewinnt
   const loadSeqRef = useRef(0);
+  // true, sobald ein load() abgeschlossen ist — der Boot-Cache darf danach nicht
+  // mehr über frische Server-Daten geschrieben werden
+  const loadDoneRef = useRef(false);
   // true, solange die Liste Server-Suchergebnisse zeigt (der Suche-Effekt hat
   // die Basisliste ersetzt) — dann darf loadMore keine Basisseite anhängen
   const usedServerSearch = useRef(false);
@@ -178,6 +181,7 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     } finally {
       // Nur die jüngste Anfrage darf die Lade-States zurücksetzen
       if (seq === loadSeqRef.current) {
+        loadDoneRef.current = true;
         setLoading(false);
         setRefreshing(false);
       }
@@ -185,12 +189,17 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
   }, [client, folderId, workspace, tag]);
 
   /** Naechste Seite nachladen (beim Scrollen ans Listenende) */
+  const loadingMoreRef = useRef(false);
   const loadMore = useCallback(async () => {
     // Aktive Server-Suche: die Liste zeigt Suchergebnisse — eine angehängte
     // ungefilterte Basisseite würde sie verfälschen
     if (usedServerSearch.current) return;
-    if (loadingMore || !hasMore || loading) return;
+    // Ref-Guard: setLoadingMore(true) wirkt erst nach dem Re-Render — zwei schnelle
+    // onEndReached-Events würden sonst dieselbe Seite doppelt anhängen
+    if (loadingMoreRef.current || !hasMore || loading) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
+    const seq = loadSeqRef.current;
     try {
       const res = await client.listNotes({
         ...(folderId != null ? { folder_id: folderId } : {}),
@@ -198,6 +207,9 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
         ...(tag ? { tags: tag } : {}),
         limit: PAGE_SIZE, offset: offsetRef.current,
       });
+      // Inzwischen wurde die Basisliste neu geladen (refreshKey/Pull-to-Refresh):
+      // Seite verwerfen, sonst Duplikate/verlorene Einträge
+      if (seq !== loadSeqRef.current) return;
       const rawCount = (res.notes ?? []).length;
       let page = res.notes ?? [];
       if (tag) {
@@ -207,21 +219,28 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
       }
       const hidden = new Set(await pendingDeleteIds().catch(() => [] as number[]));
       if (hidden.size > 0) page = page.filter((n) => !hidden.has(n.id));
-      setNotes((prev) => [...prev, ...page]);
+      // Beim Anhängen per ID deduplizieren — schützt gegen überlappende Seiten
+      setNotes((prev) => {
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...page.filter((p) => !seen.has(p.id))];
+      });
       offsetRef.current += rawCount;
       setHasMore(res.total != null ? offsetRef.current < res.total : rawCount >= PAGE_SIZE);
     } catch {
       // Offline: einfach beim naechsten Versuch weitermachen
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [client, folderId, workspace, tag, loadingMore, hasMore, loading]);
+  }, [client, folderId, workspace, tag, hasMore, loading]);
 
-  // Boot: sofort Cache zeigen, dann live aktualisieren
+  // Boot: sofort Cache zeigen, dann live aktualisieren. War das Live-Laden
+  // inzwischen fertig, darf der (ältere) Cache die frischen Daten nicht überschreiben.
   useEffect(() => {
     if (folderId == null) {
       (async () => {
         const cached = await readCachedNotes<Note[]>();
+        if (loadDoneRef.current) return;
         if (!cached || cached.length === 0) return;
         const hidden = new Set(await pendingDeleteIds().catch(() => [] as number[]));
         setNotes(hidden.size > 0 ? cached.filter((n) => !hidden.has(n.id)) : cached);
@@ -423,7 +442,12 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     let out = notes;
     if (showFavorites) out = out.filter((n) => n.favorite);
     const q = searchQuery.trim().toLowerCase();
-    if (q && q.length < 3) {
+    // Ab 3 Zeichen läuft in der Hauptansicht die Server-Suche (deren Ergebnisse
+    // hier bereits gefiltert sind — kein lokaler Filter nötig). In Ordner-/Tag-/
+    // Archiv-Ansicht wird die Server-Suche übersprungen — dort lokal filtern,
+    // damit die Suche nicht ab 3 Zeichen wirkungslos erscheint.
+    const serverSearchActive = q.length >= 3 && folderId == null && !tag && workspace == null;
+    if (q && !serverSearchActive) {
       // Lokale Suche: Listen-Notizen haben keinen Inhalt — ehrlich nur
       // Titel und Tags durchsuchen (Inhalte findet erst die Server-Suche)
       out = out.filter((n) =>
@@ -435,13 +459,13 @@ export default function NotesListScreen({ client, onOpenNote, onCreateNote, onCr
     if (sortBy === 'title') {
       sorted.sort((a, b) => (a.heading ?? '').localeCompare(b.heading ?? '', locale));
     } else if (sortBy === 'created') {
-      sorted.sort((a, b) => new Date(a.updated_at ?? 0).getTime() - new Date(b.updated_at ?? 0).getTime());
+      sorted.sort((a, b) => new Date(a.created_at ?? a.updated_at ?? 0).getTime() - new Date(b.created_at ?? b.updated_at ?? 0).getTime());
     } else {
       sorted.sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime());
     }
     // Angepinnte Notizen immer nach oben (stabil, Sortierung bleibt innerhalb der Gruppen)
     return [...sorted.filter((n) => n.pinned), ...sorted.filter((n) => !n.pinned)];
-  }, [notes, searchQuery, showFavorites, sortBy, locale]);
+  }, [notes, searchQuery, showFavorites, sortBy, locale, folderId, tag, workspace]);
 
   const renderHeader = () => (
     <View style={styles.header}>

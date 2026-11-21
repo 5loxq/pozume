@@ -23,6 +23,7 @@ type PozumeAppGroupModule = {
   clearPassword(): boolean;
   reloadWidget(): boolean;
   exportSharedAttachment(fileName: string): string | null;
+  deleteSharedAttachment(fileName: string): boolean;
 };
 
 let nativeModule: PozumeAppGroupModule | null = null;
@@ -128,6 +129,21 @@ export function exportSharedAttachment(fileName: string): string | null {
     return mod()?.exportSharedAttachment(fileName) ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Löscht eine von der Share-Extension unter SharedAttachments/ abgelegte Datei
+ * aus der App Group — nach erfolgreicher Übernahme durch exportSharedAttachment,
+ * damit große geteilte Dateien (Fotos/PDFs) den App-Group-Container nicht
+ * dauerhaft füllen.
+ * @returns true bei Erfolg, false wenn das native Modul fehlt.
+ */
+export function deleteSharedAttachment(fileName: string): boolean {
+  try {
+    return mod()?.deleteSharedAttachment(fileName) ?? false;
+  } catch {
+    return false;
   }
 }
 

@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Modal, Alert, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, typeFor, shadow, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadow, primaryButtonFor,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -46,7 +46,10 @@ export default function AiScreen({ client, notes, onBack }: Props) {
 
   // KI-Kontext: Die Notizliste liefert keinen Inhalt — die der neuesten
   // Notizen einmal pro Screen-Besuch nachladen (max. 15, im Hintergrund).
+  // Nur neu laden, wenn sich die obersten 15 IDs ändern — sonst würde nach jedem
+  // Speichern (App lädt allNotes neu) erneut gefetcht.
   const [richNotes, setRichNotes] = useState<Note[]>([]);
+  const contextIds = useMemo(() => notes.slice(0, 15).map((n) => n.id).join(','), [notes]);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -57,11 +60,12 @@ export default function AiScreen({ client, notes, onBack }: Props) {
       if (!cancelled) setRichNotes(enriched);
     })();
     return () => { cancelled = true; };
-  }, [notes, client]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextIds, client]);
 
   const saveConfig = async () => {
     if (!fBaseUrl.trim() || !fKey.trim() || !fModel.trim()) {
-      Alert.alert(t('common.error'), 'Bitte alle Felder ausfüllen.');
+      Alert.alert(t('common.error'), t('ai.fillAll'));
       return;
     }
     const c = { baseUrl: fBaseUrl.trim(), apiKey: fKey.trim(), model: fModel.trim() };
@@ -258,7 +262,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
   },
   cancelText: { color: colors.textMuted, fontWeight: '700' },
-  saveBtn: { ...primaryButton as object, flex: 1, paddingVertical: 14 },
+  saveBtn: { ...primaryButtonFor(colors), flex: 1, paddingVertical: 14 },
   saveText: { color: '#fff', fontWeight: '700' },
   clearBtn: { width: 50, borderRadius: radius.md, backgroundColor: colors.dangerSoft, alignItems: 'center', justifyContent: 'center' },
   clearText: { fontSize: 18 },

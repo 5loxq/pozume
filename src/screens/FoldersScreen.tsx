@@ -89,10 +89,13 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
         (workspaces.length > 0 ? workspaces : [undefined]).map((ws) =>
           client.listFolders(ws, true)
             .then((res) => flattenTree((res.folders ?? []) as Folder[]).map((f) => ({ ...f, workspace: ws })))
-            .catch(() => [] as Folder[]),
+            .catch(() => null as Folder[] | null),
         ),
       );
-      const list = lists.flat();
+      // Erst wenn ALLE Workspace-Abfragen fehlschlugen, werfen — sonst würde
+      // der Cache-Fallback im catch nie greifen und die Liste leer gesetzt
+      if (lists.every((l) => l === null)) throw new Error('offline');
+      const list = lists.flatMap((l) => l ?? []);
       setFolders(list);
       cacheFolders(list).catch(() => {});
     } catch (e) {
@@ -100,14 +103,19 @@ export default function FoldersScreen({ client, onOpenFolder, onOpenKanban, onBa
       const cached = await readCachedFolders<Folder[]>();
       if (cached && cached.length > 0) setFolders(cached);
     } finally {
+      loadDoneRef.current = true;
       setLoading(false);
       setRefreshing(false);
     }
   }, [client]);
 
-  // Boot: Cache sofort zeigen, dann live aktualisieren
+  // Boot: Cache sofort zeigen, dann live aktualisieren. Wenn das Live-Laden
+  // inzwischen fertig war, darf der (ältere) Cache die frischen Daten nicht
+  // überschreiben.
+  const loadDoneRef = useRef(false);
   useEffect(() => {
     readCachedFolders<Folder[]>().then((cached) => {
+      if (loadDoneRef.current) return;
       if (cached && cached.length > 0) setFolders(cached);
     });
   }, []);

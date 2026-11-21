@@ -20,7 +20,7 @@ import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
 import PromptModal from '../components/PromptModal';
 import DrawingEditor, { isDrawingContent, emptyDrawingHtml } from '../components/DrawingEditor';
-import { usePalette, spacing, radius, typeFor, primaryButton, shadow,
+import { usePalette, spacing, radius, typeFor, primaryButtonFor, shadow,
   Palette,
 } from '../theme';
 import { t, getLocale } from '../i18n';
@@ -278,7 +278,9 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
       }
       if (e?.status === 409 && e?.data?.code === 'version_conflict') {
         setSaveState('conflict');
-        handleVersionConflict(e.data.current);
+        // current kann in der 409-Antwort fehlen — ohne Fallback würde der
+        // Zugriff auf current.heading hier einen TypeError im catch-Block werfen
+        handleVersionConflict(e?.data?.current ?? {});
         return;
       }
       setSaveState('failed');
@@ -999,7 +1001,9 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     const d = new Date();
     if (m[1]) d.setFullYear(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
     d.setHours(parseInt(m[4], 10), parseInt(m[5], 10), 0, 0);
-    if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+    // Vergangenheit (auch weit zurückliegende Datumsangaben) auf morgen+ schieben —
+    // einmal +1 Tag reicht nicht, z.B. bei "2020-01-01 09:00"
+    while (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
     try {
       // Server-Erinnerung zuerst — sie funktioniert auch ohne Notification-Recht.
       // Die lokale Notification ist Bonus (offline/ohne Server-Push) und darf scheitern.
@@ -1322,7 +1326,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
               {t('editor.loadFailedText')}
             </Text>
             <TouchableOpacity
-              style={primaryButton}
+              style={primaryButtonFor(colors)}
               onPress={() => { setLoadFailed(false); setLoaded(false); setReloadKey((k) => k + 1); }}
             >
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{t('common.retry')}</Text>
@@ -1358,7 +1362,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
             onSubmitEditing={tryUnlock}
             autoFocus
           />
-          <TouchableOpacity style={[primaryButton, { marginTop: spacing.lg, paddingHorizontal: spacing.xxl }]} onPress={tryUnlock}>
+          <TouchableOpacity style={[primaryButtonFor(colors), { marginTop: spacing.lg, paddingHorizontal: spacing.xxl }]} onPress={tryUnlock}>
             <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{t('lock.unlockNote')}</Text>
           </TouchableOpacity>
         </View>

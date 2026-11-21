@@ -266,7 +266,14 @@ class ShareViewController: UIViewController {
     if data.count > 12 {
       if data[data.startIndex] == 0xFF, data[data.startIndex + 1] == 0xD8 { return "jpg" }
       if data[data.startIndex] == 0x89, data[data.startIndex + 1] == 0x50 { return "png" }
-      if String(data: data.subdata(in: 4..<8), encoding: .ascii) == "ftyp" { return "heic" }
+      // ISO-BMFF ("ftyp" an Position 4) ist nicht HEIC-spezifisch (matcht auch mp4/mov) —
+      // erst der Brand an Position 8..<12 sagt HEIC (heic/heix/hevc/mif1/msf1)
+      if String(data: data.subdata(in: 4..<8), encoding: .ascii) == "ftyp" {
+        let brand = String(data: data.subdata(in: 8..<12), encoding: .ascii) ?? ""
+        if ["heic", "heix", "hevc", "heim", "heis", "mif1", "msf1"].contains(brand) { return "heic" }
+        if brand == "mp4" || brand.starts(with: "mp4") { return "mp4" }
+        return "mov"
+      }
     }
     return "jpg"
   }

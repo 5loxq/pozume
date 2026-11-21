@@ -136,11 +136,13 @@ public class PozumeAppGroupModule: Module {
     // Name, unter dem JS das Modul per requireNativeModule() findet
     Name("PozumeAppGroup")
 
-    /// Schreibt einen String-Wert in die App Group; synchronize() macht ihn sofort für Extensions sichtbar.
+    /// Schreibt einen String-Wert in die App Group. synchronize() ist deprecated und kann
+    /// false liefern, obwohl der Wert geschrieben wurde — daher nicht als Erfolg werten.
     Function("saveValue") { (key: String, value: String) -> Bool in
       guard let defaults = self.defaults else { return false }
       defaults.set(value, forKey: key)
-      return defaults.synchronize()
+      defaults.synchronize()
+      return true
     }
 
     /// Liest einen String-Wert aus der App Group; nil, wenn der Schlüssel nicht existiert.
@@ -148,11 +150,12 @@ public class PozumeAppGroupModule: Module {
       self.defaults?.string(forKey: key)
     }
 
-    /// Löscht einen Wert aus der App Group; synchronize() macht das sofort für Extensions sichtbar.
+    /// Löscht einen Wert aus der App Group (synchronize() nur als Flush, nicht als Erfolg).
     Function("removeValue") { (key: String) -> Bool in
       guard let defaults = self.defaults else { return false }
       defaults.removeObject(forKey: key)
-      return defaults.synchronize()
+      defaults.synchronize()
+      return true
     }
 
     /// Speichert das Server-Passwort verschlüsselt in der gemeinsamen Keychain.
@@ -204,6 +207,26 @@ public class PozumeAppGroupModule: Module {
       } catch {
         return nil
       }
+    }
+
+    /**
+     * Löscht eine von der Share-Extension abgelegte Datei aus
+     * <appgroup-container>/SharedAttachments/ — nach erfolgreicher Übernahme
+     * durch die Haupt-App, damit der App-Group-Container nicht unbegrenzt wächst.
+     * @returns true bei Erfolg (auch wenn die Datei nicht existierte).
+     */
+    Function("deleteSharedAttachment") { (fileName: String) -> Bool in
+      guard PozumeAppGroupModule.isValidFileName(fileName),
+            let groupUrl = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: PozumeAppGroupModule.suiteName) else {
+        return false
+      }
+      let sourceUrl = groupUrl.appendingPathComponent("SharedAttachments", isDirectory: true).appendingPathComponent(fileName)
+      do {
+        try FileManager.default.removeItem(at: sourceUrl)
+      } catch {
+        // Datei nicht (mehr) vorhanden — nichts zu löschen
+      }
+      return true
     }
   }
 }

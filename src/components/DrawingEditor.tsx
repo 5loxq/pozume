@@ -157,15 +157,20 @@ function toExcalidraw(els: DrawEl[], raw: ExcElement[]): ExcElement[] {
         break;
       case 'path': {
         const nums = el.d.match(/-?[\d.]+/g)?.map(Number) ?? [];
-        const xs = nums.filter((_, i) => i % 2 === 0);
-        const ys = nums.filter((_, i) => i % 2 === 1);
-        if (xs.length < 2) break;
-        const minX = Math.min(...xs), minY = Math.min(...ys);
+        if (nums.length < 4) break;
+        // Bounds per Schleife — Spread über 10.000+ Punkte wirft RangeError
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (let i = 0; i + 1 < nums.length; i += 2) {
+          if (nums[i] < minX) minX = nums[i];
+          if (nums[i + 1] < minY) minY = nums[i + 1];
+          if (nums[i] > maxX) maxX = nums[i];
+          if (nums[i + 1] > maxY) maxY = nums[i + 1];
+        }
         const pts: Array<[number, number]> = [];
         for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i] - minX, nums[i + 1] - minY]);
         out.push({
           ...common, type: 'freedraw',
-          x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY,
+          x: minX, y: minY, width: maxX - minX, height: maxY - minY,
           points: pts, pressures: pts.map(() => 0.5), simulatePressure: false,
         });
         break;
@@ -179,10 +184,12 @@ function toExcalidraw(els: DrawEl[], raw: ExcElement[]): ExcElement[] {
 function parseSvg(content: string): { els: DrawEl[]; viewBox: [number, number] } {
   const els: DrawEl[] = [];
   let viewBox: [number, number] = [800, 1000];
-  const vbMatch = content.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-  if (vbMatch) viewBox = [parseFloat(vbMatch[1]), parseFloat(vbMatch[2])];
+  const vbMatch = content.match(/viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"/);
+  if (vbMatch) viewBox = [parseFloat(vbMatch[3]), parseFloat(vbMatch[4])];
   const attr = (tag: string, name: string): string | null => {
-    const m = tag.match(new RegExp(`${name}="([^"]*)"`));
+    // Attributname durch Nicht-Wordzeichen abgrenzen — sonst matcht z.B. 'd="…"'
+    // fälschlich das 'd' am Ende von 'stroke-width="…"'
+    const m = tag.match(new RegExp(`(?:^|[\\s])${name}="([^"]*)"`));
     return m ? m[1] : null;
   };
   const tagRe = /<(path|rect|ellipse|line|text)\b[^>]*\/?>(?:([\s\S]*?)<\/\1>)?/g;
@@ -255,9 +262,16 @@ export function drawElBounds(el: DrawEl): { x0: number; y0: number; x1: number; 
   switch (el.type) {
     case 'path': {
       const nums = el.d.match(/-?[\d.]+/g)?.map(Number) ?? [0, 0, 0, 0];
-      const xs = nums.filter((_, i) => i % 2 === 0);
-      const ys = nums.filter((_, i) => i % 2 === 1);
-      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+      // Reduktion per Schleife — Math.min(...xs) wirft bei langen Freihandstrichen
+      // (10.000+ Punkte) einen RangeError (Maximum call stack size exceeded)
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i + 1 < nums.length; i += 2) {
+        if (nums[i] < x0) x0 = nums[i];
+        if (nums[i + 1] < y0) y0 = nums[i + 1];
+        if (nums[i] > x1) x1 = nums[i];
+        if (nums[i + 1] > y1) y1 = nums[i + 1];
+      }
+      return { x0, y0, x1, y1 };
     }
     case 'rect': return { x0: el.x, y0: el.y, x1: el.x + el.w, y1: el.y + el.h };
     case 'ellipse': return { x0: el.cx - el.rx, y0: el.cy - el.ry, x1: el.cx + el.rx, y1: el.cy + el.ry };
@@ -382,20 +396,11 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const scale = canvasH / viewBoxRef.current[1];
   const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
 
-  const canvasRef = useRef<View>(null);
-  const canvasOrigin = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const measuredOnce = useRef(false);
-  const measureCanvas = () => {
-    canvasRef.current?.measureInWindow((wx, wy) => {
-      canvasOrigin.current = { x: wx, y: wy };
-      measuredOnce.current = true;
-    });
-  };
-  const toLocal = (pageX: number, pageY: number) => {
-    // Fallback für den unwahrscheinlichen Fall, dass noch kein Messwert da ist
-    if (!measuredOnce.current) measureCanvas();
-    return toCanvas(pageX - canvasOrigin.current.x, pageY - canvasOrigin.current.y);
-  };
+  // Neueste Werte für die Pan-Handler und commit(): useRef(PanResponder.create(...))
+  // behält die erste Instanz — ohne diesen Ref würden Tool/Farbe/Breite dauerhaft
+  // die Werte des ersten Renders verwenden und onChange wäre veraltet.
+  const latest = useRef({ tool, color, width, scale, onChange, saveAsExcalidrawHtml });
+  latest.current = { tool, color, width, scale, onChange, saveAsExcalidrawHtml };
 
   /** viewBox mitwachsen lassen, damit neue Elemente nicht abgeschnitten werden */
   const growViewBox = (el: DrawEl) => {
@@ -414,28 +419,29 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const commit = () => {
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
+    // onChange über latest — commit läuft auch aus den (stale) Pan-Handlern
+    const change = latest.current.onChange;
     if (init.excalidraw) {
       const json = JSON.stringify({ type: 'excalidraw', version: 2, source: 'pozume', elements: toExcalidraw(elementsRef.current, rawRef.current), appState: init.appState, files: init.files });
       if (init.html) {
-        // Poznote-HTML: nur das versteckte Szenen-Div austauschen, <img> (Vorschau) bleibt stehen
+        // Poznote-HTML: nur das versteckte Szenen-Div austauschen, <img> (Vorschau) bleibt stehen.
+        // Replacer-Funktion statt String — im Ersatztext wären $&, $`, $' … sonst Sonderbedeutung.
         const next = init.originalHtml.replace(
           /(<div class="excalidraw-data"[^>]*>)[\s\S]*?(<\/div>)/,
-          `$1${escapeHtml(json)}$2`,
+          (_m, p1, p2) => p1 + escapeHtml(json) + p2,
         );
-        onChange(next);
+        change(next);
       } else {
-        onChange(json);
+        change(json);
       }
-    } else if (saveAsExcalidrawHtml) {
+    } else if (latest.current.saveAsExcalidrawHtml) {
       // SVG-Anhang-Fallback: Elemente ins Excalidraw-Format wandeln, damit die Web-UI editieren kann
       const json = JSON.stringify({ type: 'excalidraw', version: 2, source: 'pozume', elements: toExcalidraw(elementsRef.current, []), appState: {}, files: {} });
-      onChange(`<div class="excalidraw-container" contenteditable="false"><p style="text-align:center; padding: 40px; color: #999;">Excalidraw diagram</p><div class="excalidraw-data" style="display: none;">${escapeHtml(json)}</div></div>`);
+      change(`<div class="excalidraw-container" contenteditable="false"><p style="text-align:center; padding: 40px; color: #999;">Excalidraw diagram</p><div class="excalidraw-data" style="display: none;">${escapeHtml(json)}</div></div>`);
     } else {
-      onChange(serializeSvg(elementsRef.current, viewBoxRef.current));
+      change(serializeSvg(elementsRef.current, viewBoxRef.current));
     }
   };
-
-  const toCanvas = (x: number, y: number) => ({ x: x / scale, y: y / scale });
 
   const eraseAt = (cx: number, cy: number) => {
     const before = elementsRef.current.length;
@@ -468,53 +474,63 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
-      measureCanvas();
-      const { x, y } = toLocal(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      const L = latest.current;
+      // locationX/Y sind bereits relativ zum Canvas-View — kein measureInWindow nötig
+      // (das ist async und lieferte in einer ScrollView je nach Scrollstand falsche Werte)
+      const x = e.nativeEvent.locationX / L.scale;
+      const y = e.nativeEvent.locationY / L.scale;
       startRef.current = { x, y };
-      if (tool === 'pen') penPointsRef.current = [`M ${x.toFixed(1)} ${y.toFixed(1)}`];
-      if (tool === 'erase') eraseAt(x, y);
-      if (tool === 'text') {
+      if (L.tool === 'pen') penPointsRef.current = [`M ${x.toFixed(1)} ${y.toFixed(1)}`];
+      if (L.tool === 'erase') eraseAt(x, y);
+      if (L.tool === 'text') {
         // Text an der Tap-Position platzieren — Eingabe im Modal (plattformübergreifend)
         setTextDraft('');
         setTextPrompt({ x, y });
       }
     },
     onPanResponderMove: (e) => {
-      if (tool === 'text') return;
-      const { x, y } = toLocal(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      const L = latest.current;
+      if (L.tool === 'text') return;
+      const x = e.nativeEvent.locationX / L.scale;
+      const y = e.nativeEvent.locationY / L.scale;
       const s = startRef.current;
       if (!s) return;
-      if (tool === 'pen') {
+      if (L.tool === 'pen') {
         penPointsRef.current.push(`L ${x.toFixed(1)} ${y.toFixed(1)}`);
-        const preview: DrawEl = { id: 'preview', type: 'path', d: penPointsRef.current.join(' '), stroke: color, strokeWidth: width, fill: 'none' };
+        const preview: DrawEl = { id: 'preview', type: 'path', d: penPointsRef.current.join(' '), stroke: L.color, strokeWidth: L.width, fill: 'none' };
         elementsRef.current = [...elementsRef.current.filter((el) => el.id !== 'preview'), preview];
         dirtyRef.current = true;
         bump();
-      } else if (tool === 'erase') {
+      } else if (L.tool === 'erase') {
         eraseAt(x, y);
       } else {
-        const preview = makeShape(tool, s, { x, y }, color, width);
+        const preview = makeShape(L.tool, s, { x, y }, L.color, L.width);
         elementsRef.current = [...elementsRef.current.filter((el) => el.id !== 'preview'), preview];
         dirtyRef.current = true;
         bump();
       }
     },
     onPanResponderRelease: () => {
-      if (tool === 'text') { startRef.current = null; return; }
+      const L = latest.current;
+      if (L.tool === 'text') { startRef.current = null; return; }
       const preview = elementsRef.current.find((el) => el.id === 'preview');
       let added: DrawEl | null = null;
       if (preview) {
         elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
-        if (tool === 'pen' && penPointsRef.current.length > 1) {
+        if (L.tool === 'pen' && penPointsRef.current.length > 1) {
           added = { ...(preview as PathEl), id: nextId() };
-        } else if (tool !== 'pen' && startRef.current) {
-          added = { ...preview, id: nextId() } as DrawEl;
+        } else if (L.tool !== 'pen' && startRef.current) {
+          // Degenerierte Form (Tap ohne Zug, < 2px) verwerfen
+          const b = drawElBounds(preview);
+          if (b.x1 - b.x0 >= 2 || b.y1 - b.y0 >= 2) {
+            added = { ...preview, id: nextId() } as DrawEl;
+          }
         }
-      } else if (tool === 'pen' && startRef.current) {
+      } else if (L.tool === 'pen' && startRef.current) {
         // Einzelner Stift-Tap ohne Bewegung: einen Punkt als kleinen Kreis zeichnen
         const s = startRef.current;
-        const r = Math.max(2, width / 2);
-        added = { id: nextId(), type: 'ellipse', cx: s.x, cy: s.y, rx: r, ry: r, stroke: color, strokeWidth: 0, fill: color };
+        const r = Math.max(2, L.width / 2);
+        added = { id: nextId(), type: 'ellipse', cx: s.x, cy: s.y, rx: r, ry: r, stroke: L.color, strokeWidth: 0, fill: L.color };
       }
       if (added) {
         elementsRef.current.push(added);
@@ -524,6 +540,17 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
       }
       startRef.current = null;
       commit();
+    },
+    onPanResponderTerminate: () => {
+      // Geste extern beendet (z.B. ScrollView übernimmt den Responder): Preview-Element
+      // entfernen, damit es nicht dauerhaft mit id "preview" in die Szene serialisiert wird
+      if (elementsRef.current.some((el) => el.id === 'preview')) {
+        elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
+        dirtyRef.current = true;
+        bump();
+        commit();
+      }
+      startRef.current = null;
     },
   })).current;
 
@@ -570,11 +597,8 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           <Text style={styles.toolIcon}>🗑</Text>
         </TouchableOpacity>
       </View>
-      {/* onLayout misst den Ursprung synchron nach dem Layout — vor dem ersten
-          Touch-Grant steht so immer ein Messwert bereit (measureInWindow ist async) */}
+      {/* PanResponder liefert locationX/Y relativ zu diesem View — kein Messen nötig */}
       <View
-        ref={canvasRef}
-        onLayout={measureCanvas}
         style={[styles.canvas, { width: canvasW, height: canvasH }]}
         {...pan.panHandlers}
       >

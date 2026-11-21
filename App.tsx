@@ -24,7 +24,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { clearAllLocalData } from './src/api/localData';
 // App-Group-Zugriff: schreibt/löscht die Server-Zugangsdaten für Widget + Share-Extension
 import { saveServerConfig, clearServerConfig, readValue, removeValue, saveValue,
-  reloadWidget, exportSharedAttachment } from './modules/pozume-app-group';
+  reloadWidget, exportSharedAttachment, deleteSharedAttachment } from './modules/pozume-app-group';
 import { installCrashHandler } from './src/api/crashLog';
 import * as Linking from 'expo-linking';
 import { loadLocaleOverride, onLocaleChange, t } from './src/i18n';
@@ -147,9 +147,13 @@ function AppInner() {
       else removeValue('pozume.pendingShare');
       if (newest && typeof newest.heading === 'string' && typeof newest.content === 'string') {
         let initialAttachment: { uri: string; name?: string; mimeType?: string } | null = null;
+        let sharedSource: string | null = null;
         if (typeof newest.imagePath === 'string' && newest.imagePath) {
           const copied = exportSharedAttachment(newest.imagePath);
-          if (copied) initialAttachment = { uri: copied, name: newest.imagePath };
+          if (copied) {
+            initialAttachment = { uri: copied, name: newest.imagePath };
+            sharedSource = newest.imagePath;
+          }
         }
         // Geteilte Datei (z.B. PDF) — analog zum Bild aus der App Group in den
         // Cache kopieren und dem Editor als initialen Anhang mitgeben (P1-12)
@@ -161,8 +165,12 @@ function AppInner() {
               name: typeof newest.fileName === 'string' && newest.fileName ? newest.fileName : newest.filePath,
               ...(typeof newest.fileType === 'string' && newest.fileType ? { mimeType: newest.fileType } : {}),
             };
+            sharedSource = newest.filePath;
           }
         }
+        // Erfolgreich übernommen: Quelldatei aus der App Group löschen, damit
+        // SharedAttachments/ nicht bei jedem Share weiter wächst
+        if (sharedSource) deleteSharedAttachment(sharedSource);
         setRoute({ name: 'editor', note: null, prefill: { heading: newest.heading, content: newest.content }, initialAttachment });
       }
     } catch {}
@@ -455,6 +463,8 @@ function AppInner() {
             setClient(null);
             setRoute({ name: 'list' });
             clearServerConfig();
+            // Wartende Share-Einträge des alten Kontos verwerfen (Kontotrennung)
+            removeValue('pozume.pendingShare');
             // Widget zeigt sonst bis zu 1 h alte Daten mit ungueltigen Zugangsdaten
             reloadWidget();
             // Lokale Inhalte (Cache, Entwürfe, Offline-Queue, Anhänge) loeschen,

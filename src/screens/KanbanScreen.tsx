@@ -94,7 +94,15 @@ export default function KanbanScreen({ client, folderId, folderName, onOpenNote,
     let pending = Object.keys(columnRefs.current).length;
     if (pending === 0) { setDrag({ note, fromId, x, y }); return; }
     for (const [idStr, ref] of Object.entries(columnRefs.current)) {
-      ref?.measureInWindow((bx, by, bw, bh) => {
+      if (!ref) {
+        // ohne View feuert measureInWindow nie — sonst käme pending nie auf 0
+        if (--pending === 0) {
+          setBounds(measured);
+          setDrag({ note, fromId, x, y });
+        }
+        continue;
+      }
+      ref.measureInWindow((bx, by, bw, bh) => {
         measured.push({ id: Number(idStr), x: bx, y: by, w: bw, h: bh });
         if (--pending === 0) {
           setBounds(measured);
@@ -230,47 +238,62 @@ function KanbanCard({ note, column, onPress, onMenu, onDragStart, onDragMove, on
   const gesture = useRef({ x: 0, y: 0, t: 0, dragging: false, longFired: false });
   const longTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Neueste Props/Callbacks für die Pan-Handler: useRef(PanResponder.create(...))
+  // behält die erste Instanz — ohne diesen Ref würden die Handler dauerhaft
+  // die Werte des ersten Renders closen (z.B. onDragEnd mit bounds = [])
+  const latest = useRef({ note, column, onPress, onMenu, onDragStart, onDragMove, onDragEnd });
+  latest.current = { note, column, onPress, onMenu, onDragStart, onDragMove, onDragEnd };
+
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
+      const L = latest.current;
       gesture.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, t: Date.now(), dragging: false, longFired: false };
       longTimer.current = setTimeout(() => {
         if (!gesture.current.dragging) {
           gesture.current.longFired = true;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onMenu(note, column);
+          latest.current.onMenu(latest.current.note, latest.current.column);
         }
       }, 550);
     },
     onPanResponderMove: (e) => {
+      const L = latest.current;
       const g = gesture.current;
       const dx = e.nativeEvent.pageX - g.x;
       const dy = e.nativeEvent.pageY - g.y;
       if (!g.dragging && !g.longFired && (Math.abs(dx) > 12 || Math.abs(dy) > 12) && Date.now() - g.t > 150) {
         g.dragging = true;
         if (longTimer.current) clearTimeout(longTimer.current);
-        onDragStart(note, column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
+        L.onDragStart(L.note, L.column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
       } else if (g.dragging) {
-        onDragMove(e.nativeEvent.pageX, e.nativeEvent.pageY);
+        L.onDragMove(e.nativeEvent.pageX, e.nativeEvent.pageY);
       }
     },
     onPanResponderRelease: (e) => {
       if (longTimer.current) clearTimeout(longTimer.current);
+      const L = latest.current;
       const g = gesture.current;
       if (g.dragging) {
-        onDragEnd(note, column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
+        L.onDragEnd(L.note, L.column.id, e.nativeEvent.pageX, e.nativeEvent.pageY);
       } else if (!g.longFired && Date.now() - g.t < 400) {
-        onPress(note);
+        L.onPress(L.note);
       }
       g.dragging = false;
     },
     onPanResponderTerminate: () => {
       if (longTimer.current) clearTimeout(longTimer.current);
-      if (gesture.current.dragging) onDragEnd(note, column.id, -1, -1);
+      const L = latest.current;
+      if (gesture.current.dragging) L.onDragEnd(L.note, L.column.id, -1, -1);
       gesture.current.dragging = false;
     },
   })).current;
+
+  // Long-Press-Timer beim Unmount aufräumen
+  useEffect(() => () => {
+    if (longTimer.current) clearTimeout(longTimer.current);
+  }, []);
 
   return <View {...pan.panHandlers}>{renderContent(note)}</View>;
 }

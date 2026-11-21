@@ -1,7 +1,7 @@
 import React, {useState, useMemo} from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { usePalette, spacing, radius, typeFor, shadowSoft, primaryButton,
+import { usePalette, spacing, radius, typeFor, shadowSoft, primaryButtonFor,
   Palette,
 } from '../theme';
 import { t } from '../i18n';
@@ -113,7 +113,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     borderWidth: 1, borderColor: colors.border,
     ...shadowSoft,
   },
-  button: { ...primaryButton, marginTop: spacing.md },
+  button: { ...primaryButtonFor(colors), marginTop: spacing.md },
   buttonBusy: { opacity: 0.7 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   error: { color: colors.danger, fontSize: 13, marginTop: spacing.sm, textAlign: 'center' },

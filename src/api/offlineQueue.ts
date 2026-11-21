@@ -258,6 +258,12 @@ async function flushQueueInner(client: PoznoteClient): Promise<FlushResult> {
           ...(entry.if_version ? { if_version: entry.if_version } : {}),
         });
       }
+      // Auch update/delete/move sofort dauerhaft entfernen (create macht das oben
+      // bereits selbst): Stirbt die App vor dem gesammelten Queue-Speichern am
+      // Flush-Ende, würde sonst z.B. ein bereits übernommener Update mit dem
+      // verbrauchten if_version erneut gesendet → 409 → die eigene, längst
+      // übernommene Änderung landet fälschlich als Konflikt-Entwurf.
+      if (entry.kind !== 'create') await removePair(pair);
       flushed++;
       processed.add(pair);
     } catch (e: any) {

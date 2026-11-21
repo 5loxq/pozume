@@ -1,9 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { usePalette, spacing, radius, typeFor, shadow, tagColors,
+import { usePalette, useIsDark, spacing, radius, typeFor, shadow, tagColors,
   Palette,
 } from '../theme';
-import { useColorScheme } from 'react-native';
 import { formatRelativeDate, excerpt, parseTags } from '../utils';
 import { isDrawingContent } from './DrawingEditor';
 import DrawingPreview from './DrawingPreview';
@@ -28,11 +27,17 @@ interface Props {
 const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPress, onLongPress, drawingContent, selectMode, selected }: Props) {
   const colors = usePalette();
   const type = typeFor(colors);
-  const styles = getStyles(colors, type);
-  const isDark = useColorScheme() === 'dark';
+  // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
+  const styles = useMemo(() => getStyles(colors, type), [colors]);
+  // isDark aus dem effektiven Theme (inkl. manuellem Override), nicht nur System
+  const isDark = useIsDark();
   const tags = parseTags(note.tags);
   const colorHex = note.color_hex ?? null;
-  const drawing = drawingContent ?? (isDrawingContent(note.content) ? note.content : null);
+  // isDrawingContent parst bei JSON-Notizen den kompletten Inhalt — pro Render cachen
+  const drawing = useMemo(
+    () => drawingContent ?? (isDrawingContent(note.content) ? note.content : null),
+    [drawingContent, note.content],
+  );
   return (
     <TouchableOpacity
       style={[styles.card, shadow, colorHex ? { borderLeftColor: colorHex, borderLeftWidth: 4 } : null]}

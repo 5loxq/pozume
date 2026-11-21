@@ -47,14 +47,15 @@ const dark: Palette = {
   star: '#fbbf24', success: '#4ade80',
 };
 
-export function usePalette(): Palette {
+export function useIsDark(): boolean {
   const system = useColorScheme();
   const mode = getThemeMode();
-  const scheme = mode === 'auto' ? system : mode;
-  return scheme === 'dark' ? dark : light;
+  return (mode === 'auto' ? system : mode) === 'dark';
 }
 
-export const colors = light;
+export function usePalette(): Palette {
+  return useIsDark() ? dark : light;
+}
 
 const TAG_PALETTE_LIGHT: [string, string][] = [
   ['#eef2ff', '#4f46e5'], ['#ecfeff', '#0891b2'], ['#fef3c7', '#b45309'],
@@ -112,15 +113,6 @@ export function primaryButtonFor(p: Palette) {
     justifyContent: 'center' as const,
   };
 }
-
-/**
- * Light-Fallback für statische StyleSheet-Definitionen (Modul-Ladezeit,
- * vor dem ersten Palette-Wechsel) — bleibt als Objekt exportiert, damit
- * bestehende Nutzungen (Spread in StyleSheet.create, direkte style-Übergabe)
- * kompatibel bleiben. Palette-abhängige Aufrufer sollten primaryButtonFor
- * mit ihrer Palette verwenden.
- */
-export const primaryButton = primaryButtonFor(light);
 
 export const greetingForHour = (hour: number, locale = 'de'): string => {
   if (locale === 'de') {

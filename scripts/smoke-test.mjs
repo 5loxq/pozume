@@ -86,7 +86,8 @@ async function main() {
   });
   await check('Aufgaben (GET /tasks)', async () => {
     const d = await get('/tasks');
-    assert(Array.isArray(d.notes ?? d.checklists ?? []), 'notes/checklists fehlen');
+    // ohne ?? [] Fallback: sonst ist der Check wirkungslos (?? [] ist immer ein Array)
+    assert(Array.isArray(d.notes ?? d.checklists), 'notes/checklists fehlen');
   });
   await check('Papierkorb (GET /trash)', async () => {
     const d = await get('/trash');
@@ -94,7 +95,7 @@ async function main() {
   });
   await check('Erinnerungen (GET /reminders)', async () => {
     const d = await get('/reminders?scope=all');
-    assert(Array.isArray(d.notifications ?? d.reminders ?? []), 'notifications fehlen');
+    assert(Array.isArray(d.notifications ?? d.reminders), 'notifications/reminders fehlen');
   });
   await check('Graph (GET /graph)', async () => {
     const d = await get('/graph');
@@ -106,7 +107,7 @@ async function main() {
   });
   await check('Volltextsuche (GET /notes/search)', async () => {
     const d = await get(`/notes/search?q=${encodeURIComponent('a')}`);
-    assert(Array.isArray(d.results ?? d.notes ?? []), 'results fehlen');
+    assert(Array.isArray(d.results ?? d.notes), 'results/notes fehlen');
   });
 
   // --- Schreibzyklus auf einer temporären Notiz ---
@@ -196,7 +197,9 @@ async function main() {
     await check('Delta-Sync: updated_after wird (noch) ignoriert — bekannte Limitation', async () => {
       const all = await get('/notes?limit=1');
       const cut = await get('/notes?limit=1&updated_after=2000-01-01%2000:00:00');
-      assert((all.total ?? 0) === (cut.total ?? -1),
+      // Defaults symmetrisch — sonst schlägt der Check fälschlich fehl, wenn der
+      // Server updated_after ignoriert und in beiden Antworten kein total liefert
+      assert((all.total ?? -1) === (cut.total ?? -1),
         `Server filtert jetzt nach updated_after (${all.total} vs ${cut.total}) — Delta-Sync in der App implementieren!`);
     });
     await check('Aufgabe anlegen/loeschen (eigene Taskliste)', async () => {
