@@ -77,7 +77,9 @@ export function tagColors(tag: string, dark?: boolean): { bg: string; fg: string
 }
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
-export const radius = { sm: 10, md: 14, lg: 18, xl: 24, pill: 999 };
+// Modernisierung: rundere Ecken (Karten 20px, Sheets 26px) für ein weicheres,
+// zeitgemäßes Erscheinungsbild; pill bleibt für Chips/Buttons
+export const radius = { sm: 12, md: 16, lg: 20, xl: 26, pill: 999 };
 
 export function typeFor(p: Palette) {
   return {
@@ -89,13 +91,15 @@ export function typeFor(p: Palette) {
   };
 }
 
+// Modernisierung: weichere, weiter gefasste Schatten statt harter Kanten —
+// Light Mode wirkt dadurch luftig, Dark Mode ergänzt feine Rahmen stattdessen
 export const shadow = Platform.select({
-  ios: { shadowColor: '#1a2340', shadowOpacity: 0.07, shadowRadius: 12, shadowOffset: { width: 0, height: 4 } },
-  android: { elevation: 3 },
+  ios: { shadowColor: '#1a2340', shadowOpacity: 0.06, shadowRadius: 18, shadowOffset: { width: 0, height: 7 } },
+  android: { elevation: 4 },
 });
 
 export const shadowSoft = Platform.select({
-  ios: { shadowColor: '#1a2340', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+  ios: { shadowColor: '#1a2340', shadowOpacity: 0.04, shadowRadius: 10, shadowOffset: { width: 0, height: 3 } },
   android: { elevation: 1 },
 });
 

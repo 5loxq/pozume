@@ -28,9 +28,8 @@ const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPres
   const colors = usePalette();
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
-  const styles = useMemo(() => getStyles(colors, type), [colors]);
-  // isDark aus dem effektiven Theme (inkl. manuellem Override), nicht nur System
   const isDark = useIsDark();
+  const styles = useMemo(() => getStyles(colors, type, isDark), [colors, isDark]);
   const tags = parseTags(note.tags);
   const colorHex = note.color_hex ?? null;
   // isDrawingContent parst bei JSON-Notizen den kompletten Inhalt — pro Render cachen
@@ -81,13 +80,15 @@ const NoteCard = React.memo(function NoteCard({ note, locale, onPress, onTagPres
 
 export default NoteCard;
 
-const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSheet.create({
+const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>, isDark: boolean) => StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    marginBottom: spacing.md,
-    borderWidth: 1,
+    marginBottom: spacing.md + 2,
+    // Light: schwebende Karte ganz ohne Rand (Schatten macht die Kante);
+    // Dark: weicher feiner Rand, Schatten wären auf dunklem Grund unsichtbar
+    borderWidth: isDark ? 1 : 0,
     borderColor: colors.border,
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start' },
@@ -98,7 +99,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     textAlign: 'center', lineHeight: 19, fontSize: 13, fontWeight: '800', overflow: 'hidden',
   },
   selectBoxActive: { borderColor: '#4f46e5', backgroundColor: '#4f46e5' },
-  title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.2 },
+  title: { ...type.h2, flex: 1, fontSize: 16, lineHeight: 22, letterSpacing: -0.3 },
   icons: { fontSize: 15, marginLeft: spacing.sm, color: colors.star },
   excerpt: { ...type.muted, marginTop: spacing.xs, lineHeight: 20 },
   footerRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, gap: 6 },
@@ -108,6 +109,6 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     paddingVertical: 4,
     marginRight: 2,
   },
-  tagText: { fontSize: 12, fontWeight: '600' },
+  tagText: { fontSize: 12, fontWeight: '600', letterSpacing: 0.2 },
   date: { ...type.faint(), marginLeft: 'auto', fontSize: 12 },
 });

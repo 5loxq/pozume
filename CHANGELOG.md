@@ -5,6 +5,27 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Re-Audit und Grafik-Modernisierung (Design-Pass)
+
+Erneuter Komplett-Durchgang plus visuelle Modernisierung. Audit: tsc fehlerfrei,
+Release-Bundle (904 Module, 1 Asset), Mermaid-Renderer e2e in Headless-Chrome
+(gültiges Diagramm rendert mit Geometrie, wirklich ungültiger Quelltext
+meldet „No diagram type detected…“ — der alte Fehlerfall-Test war zu mild,
+mermaid v11 akzeptiert `participant ][ broken` tatsächlich); Logik-Review der
+letzten Runden ohne neue Funde. Design-Pass (nur Styles, keine Logik):
+theme.ts radius sm/md/lg/xl 10/14/18/24 → 12/16/20/26 und weichere, weiter
+gefasste Schatten (ios shadowRadius 12→18, opacity 0.07→0.06) — wirkt auf
+allen Karten, Sheets, Menüs, Chips und der Mermaid-Box automatisch. NoteCard:
+im Light Mode komplett rahmenlos schwebend (Schatten macht die Kante), im
+Dark Mode feiner Rand statt unsichtbarem Schatten; Titel-Laufweite und
+Tag-Chips feingeschliffen, Kartenabstand etwas luftiger. DrawingEditor:
+Toolbar mit Rand und Schwebeschatten, quadratisch-runde Werkzeugtasten
+(12px-Ecken statt Kreise), größere Farbpunkte, Canvas und Text-Sheet runder
+mit Schatten. Suchleiste, FABs, Auswahl-Leiste, Editor-Topbar erben die
+neuen Radien/Schatten unverändert. Verifikation: tsc fehlerfrei, Bundle
+gebaut, Release-Build und Installation aufs iPhone von Roman in dieser
+Runde ausgeführt.
+
 ## 2026-11-22 — Testrunde auf dem Gerät (iPhone 13): Dark-Mode-Sichtbarkeit, Editor-Werkzeuge, Preview-Default
 
 Live-Test des Device-Builds durch Roman; fünf gemeldete Punkte, alle behoben.
