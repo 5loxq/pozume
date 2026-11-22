@@ -2,10 +2,12 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Mermaid-Bibliothek (assets/mermaid.min.mjs) als rohes Asset bündeln,
+// Mermaid-Bibliothek (assets/mermaid.min.mjslib) als rohes Asset bündeln,
 // damit sie zur Laufzeit ohne CDN aus dem App-Paket geladen werden kann.
-// assetExts haben im Metro-Resolver Vorrang vor sourceExts, daher wird die
-// Datei trotz .mjs-Endung als Asset kopiert und nicht als JS-Modul geparst.
-config.resolver.assetExts.push('mjs');
+// Bewusst eine PRIVATE Endung (.mjslib): 'mjs' global zu assetExts hinzuzufügen
+// würde auch ESM-Einträge echter Pakete (abort-controller, event-target-shim,
+// NetInfo-Abhängigkeiten) zu Assets machen und deren Code still ersetzen.
+// assetExts haben im Metro-Resolver Vorrang vor sourceExts.
+config.resolver.assetExts.push('mjslib');
 
 module.exports = config;

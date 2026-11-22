@@ -7,7 +7,7 @@ import { diagramHtml } from './mermaidHtml';
  * Zur Laufzeit wird sie einmal in das Cache-Verzeichnis kopiert und von der
  * WebView über file:// geladen — kein CDN, keine Netzwerkzugriffe.
  */
-const MERMAID_ASSET = require('../../assets/mermaid.min.mjs');
+const MERMAID_ASSET = require('../../../assets/mermaid.min.mjslib');
 
 const DIR = `${FileSystem.cacheDirectory}pozume-mermaid/`;
 const HTML_PATH = `${DIR}renderer.html`;
