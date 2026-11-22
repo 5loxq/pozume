@@ -5,6 +5,35 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — WYSIWYG-Editor (Rich Text): Fett ohne sichtbaren Markdown-Code
+
+Entscheidung von Roman: echter Rich-Text-Editor statt sichtbarer Syntax.
+Umsetzung als WebView-Editor mit gleichem Sandbox-Modell wie der Mermaid-
+Renderer (CSP default-src 'none', keine Netzwerkzugriffe, nur injectJavaScript
++ postMessage). Der Editor tippt und zeigt <strong>/<em> direkt — im Editor
+erscheint „nur fett“, keine **-Zeichen; die PAGE konvertiert live in beide
+Richtungen nach Markdown, sodass Content-State, Autosave, Vorschau
+(MarkdownView), Mermaid-Zaun-Blöcke und der PozNote-Server weiterhin
+unverändert `**fett**` sehen. Neue Dateien: src/components/richtext/
+(richHtml.ts: Seite + Konverter in beiden Richtungen + Befehle; RichEditor.tsx:
+RN-Wrapper mit Höhen-Nachführung, Extern-Änderungs-Sync per lastMdRef — der
+Editor lädt nur dann neu, wenn der Wert NICHT von ihm selbst kam, damit keine
+Ping-Pong-Schleife entsteht). Format-Toolbar schaltet auf Editor-Befehle
+(bold/italic/code/codeblock/h2/ul/ol/quote/mermaid + NEU undo/redo über die
+WebView-native Undo-Historie); Markierungstasten entfallen ersatzlos. Nicht-
+Markdown-Typen (z.B. Web-HTML-Notizen) editieren weiter als Rohtext-Input.
+Die Zeichnen-Runde der nativen Live-Markdown-Bibliothek ist konsequent
+rückgebaut: @expensify/react-native-live-markdown, expensify-common, react-
+native-reanimated deinstalliert, Pods wieder auf 87, LiveMarkdownInput.tsx
+gelöscht. Konverter-Verifikation per Headless-Chrome: Markdown→HTML→Markdown
+ist idempotent (zweiter Roundtrip identisch mit dem ersten) — Überschriften,
+Fett/Kursiv (Wortgrenzen wie MarkdownView — some_var_name bleibt normal),
+Inline-Code, ungeordnete/geordnete Listen, Zitate, ```mermaid-Zaun, [[Wiki-]]
+und pozume://note-Links, --- Trennlinien. tsc fehlerfrei, Release-Bundle
+gebaut, Build + Installation aufs iPhone von Roman in dieser Runde. Offen
+für Geraetetest: Tastatur/Fokus-Randfälle im WKWebView (Caret-Sichtbarkeit,
+Klappen der Tastatur über dem Feld) und Editieren sehr langer Notizen.
+
 ## 2026-11-22 — Erste Geraete-Runde New Architecture: Mermaid-Inline-Fix, Zeichnen-Fabric-Fix
 
 Geraetetest von Roman brachte zwei Treffer, beide behoben. (1) Mermaid:

@@ -18,7 +18,7 @@ import { enqueueUpload, uploadsFor, removeUpload } from '../api/uploadQueue';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin, pinRetryDelay } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
-import LiveMarkdownInput from '../components/LiveMarkdownInput';
+import RichEditor, { type RichEditorHandle } from '../components/richtext/RichEditor';
 import PromptModal from '../components/PromptModal';
 import DrawingEditor, { isDrawingContent, emptyDrawingHtml } from '../components/DrawingEditor';
 import { usePalette, spacing, radius, typeFor, primaryButtonFor, shadow,
@@ -614,33 +614,11 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
 
-  // --- Formatier-Werkzeugleiste: Markdown-Syntax am Cursor einfügen bzw.
-  // Auswahl umpacken (Fett, Kursiv, Code, Listen, …) ---
-  const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
-  const applyWrap = (before: string, after: string) => {
-    const { start, end } = selRef.current;
-    const next = content.slice(0, start) + before + content.slice(start, end) + after + content.slice(end);
-    setContent(next);
-    const delta = before.length;
-    setFindSelection({ start: start + delta, end: end + delta });
-    scheduleSave();
-  };
-  const applyLine = (prefix: string) => {
-    const { start, end } = selRef.current;
-    const ls = content.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
-    const next = content.slice(0, ls) + prefix + content.slice(ls);
-    setContent(next);
-    setFindSelection({ start: start + prefix.length, end: end + prefix.length });
-    scheduleSave();
-  };
-  const applyMermaid = () => {
-    const { start } = selRef.current;
-    const block = '\n```mermaid\nflowchart TD\n  A --> B\n```\n';
-    const next = content.slice(0, start) + block + content.slice(start);
-    setContent(next);
-    setFindSelection(undefined);
-    scheduleSave();
-  };
+  // WYSIWYG-Rich-Editor für Markdown-Notizen; andere editierbare Formate
+  // bleiben Rohtext-Input (der Web-Import-HTML-Typ würde im Konverter Müll)
+  const markdownish = isNew || (note?.type ?? '') === 'markdown';
+  const richRef = useRef<RichEditorHandle | null>(null);
+  const richCmd = (name: string) => { richRef.current?.cmd(name); };
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
   // Nicht unterstützte Formate (html, tasklist, …) schreibgeschützt öffnen —
   // Bearbeiten im Text-Editor würde die Struktur beschädigen
@@ -1643,34 +1621,40 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
           editable={!serverLocked && !formatReadOnly}
         />
-        {!isExcalidraw && !preview && !formatReadOnly && !serverLocked && (
+        {!isExcalidraw && !preview && !formatReadOnly && !serverLocked && markdownish && (
           <View style={styles.fmtRow}>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('**', '**')} accessibilityLabel={t('editor.fmtBold')}>
-              <Text style={styles.fmtText}>B</Text>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('bold')} accessibilityLabel={t('editor.fmtBold')}>
+              <Text style={styles.fmtTextBold}>B</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('_', '_')} accessibilityLabel={t('editor.fmtItalic')}>
-              <Text style={[styles.fmtText, { fontStyle: 'italic' }]}>I</Text>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('italic')} accessibilityLabel={t('editor.fmtItalic')}>
+              <Text style={[styles.fmtText, { color: colors.text, fontStyle: 'italic' }]}>I</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('`', '`')} accessibilityLabel={t('editor.fmtCode')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('code')} accessibilityLabel={t('editor.fmtCode')}>
               <Text style={styles.fmtText}>‹›</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('\n```\n', '\n```')} accessibilityLabel={t('editor.fmtCodeblock')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('codeblock')} accessibilityLabel={t('editor.fmtCodeblock')}>
               <Text style={styles.fmtText}>{'{ }'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('## ')} accessibilityLabel={t('editor.fmtHeading')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('h2')} accessibilityLabel={t('editor.fmtHeading')}>
               <Text style={styles.fmtText}>H2</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('- ')} accessibilityLabel={t('editor.fmtList')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('ul')} accessibilityLabel={t('editor.fmtList')}>
               <Text style={styles.fmtText}>•</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('1. ')} accessibilityLabel={t('editor.fmtNumberList')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('ol')} accessibilityLabel={t('editor.fmtNumberList')}>
               <Text style={styles.fmtText}>1.</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('> ')} accessibilityLabel={t('editor.fmtQuote')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('quote')} accessibilityLabel={t('editor.fmtQuote')}>
               <Text style={styles.fmtText}>❝</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={applyMermaid} accessibilityLabel={t('editor.fmtMermaid')}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('mermaid')} accessibilityLabel={t('editor.fmtMermaid')}>
               <Text style={styles.fmtText}>📊</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('undo')} accessibilityLabel={t('editor.fmtUndo')}>
+              <Text style={styles.fmtText}>↩︎</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('redo')} accessibilityLabel={t('editor.fmtRedo')}>
+              <Text style={styles.fmtText}>↪︎</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1688,15 +1672,25 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
               onOpenNoteTitle={openNoteByTitle}
             />
           </View>
-        ) : (
-          <LiveMarkdownInput
+        ) : markdownish ? (
+          <RichEditor
+            ref={richRef}
             value={content}
-            onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
-            onSelectionChange={(e) => { selRef.current = { start: e.nativeEvent.selection.start, end: e.nativeEvent.selection.end }; }}
-            selection={findSelection}
+            onChange={(md) => { setContent(md); scheduleSave(); }}
+            editable={!serverLocked && !formatReadOnly}
+            placeholder={t('editor.contentPlaceholder')}
+          />
+        ) : (
+          <TextInput
+            style={styles.contentInput}
             placeholder={t('editor.contentPlaceholder')}
             placeholderTextColor={colors.textFaint}
+            value={content}
+            onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
+            selection={findSelection}
             editable={!serverLocked && !formatReadOnly}
+            multiline
+            textAlignVertical="top"
           />
         )}
         <TextInput
@@ -1926,6 +1920,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6,
   },
   fmtText: { fontSize: 13, fontWeight: '600', color: colors.text, fontFamily: 'Menlo' },
+  fmtTextBold: { fontSize: 13, fontWeight: '800', color: colors.text, fontFamily: 'Menlo' },
   contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {
     marginTop: spacing.lg, fontSize: 14, fontWeight: '600', color: colors.primary,

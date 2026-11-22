@@ -115,6 +115,8 @@ export const de = {
   'editor.fmtList': 'Liste',
   'editor.fmtNumberList': 'Nummerierte Liste',
   'editor.fmtQuote': 'Zitat',
+  'editor.fmtUndo': 'Rückgängig',
+  'editor.fmtRedo': 'Wiederholen',
   'editor.fmtMermaid': 'Mermaid-Diagramm einfügen',
   'ai.title': 'KI-Assistent',
   'ai.placeholder': 'Frag etwas… „Fasse Notiz X zusammen"',

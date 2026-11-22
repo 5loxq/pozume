@@ -117,6 +117,8 @@ export const fr: Record<TranslationKey, string> = {
   'editor.fmtList': 'Liste',
   'editor.fmtNumberList': 'Liste numérotée',
   'editor.fmtQuote': 'Citation',
+  'editor.fmtUndo': 'Annuler',
+  'editor.fmtRedo': 'Rétablir',
   'editor.fmtMermaid': 'Insérer un diagramme Mermaid',
   'ai.title': 'Assistant IA',
   'ai.placeholder': 'Posez une question… « Résume la note X »',
