@@ -10,8 +10,8 @@
  *    per injectJavaScript übergeben und via innerHTML eingesetzt —
  *    <script>-Tags im SVG werden dadurch nicht ausgeführt.
  *
- * Zwei Varianten aus einem Gerüst:
- *  - withMermaid: lädt ./mermaid.min.js und stellt __pozumeRender bereit
+ * Zwei Varianten aus einem Gerüst — je nachdem, ob mermaidSource übergeben wird:
+ *  - mit: rendert live (renderer.html, inklusive inline-Mermaid)
  *  - ohne: reine Anzeige eines fertigen SVG (Cache/Vollbild), __pzInject
  */
 
@@ -125,19 +125,28 @@ window.__pozumeRender = function (payload) {
 };
 `;
 
-/** HTML-Gerüst bauen. bg transparent: Hintergrundfarbe kommt von der App. */
-export function diagramHtml(withMermaid: boolean): string {
-  const csp = "default-src 'none'; script-src 'unsafe-inline'" + (withMermaid ? " 'self'" : '') + "; style-src 'unsafe-inline'; img-src data:; font-src data:";
+/** HTML-Gerüst bauen. bg transparent: Hintergrundfarbe kommt von der App.
+ *  mermaidSource: Mermaid-Bibliothek INLINIERT in die HTML-Datei —
+ *  WKWebView unter file:// vergibt keine Lese-Rechte an Geschwister-Dateien
+ *  und CSP 'self' matcht bei file-Ursprüngen nicht; eine einzige
+ *  selbstenthaltene Datei (renderer.html) umgeht beides. */
+export function diagramHtml(mermaidSource?: string | null): string {
+  const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
+  let mermaidScripts = '';
+  if (mermaidSource != null) {
+    // „</script" im Quelltext würde das Inline-Tag vorzeitig schließen —
+    // in JS-Strings ist <\/script ein gültiger Ersatz für </script
+    const safe = mermaidSource.replace(/<\/(script)/gi, '<\\/$1');
+    mermaidScripts = `<script>${safe}</script><script>${MERMAID_JS}</script>`;
+  }
   return '<!DOCTYPE html><html><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1">'
     + '<meta http-equiv="Content-Security-Policy" content="' + csp + '">'
     + '<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;}'
     + '#stage{padding:8px;transform-origin:0 0;}'
-    + '#stage svg{max-width:100%;height:auto;display:block;}</style>'
+    + '#stage svg{height:auto;display:block;}</style>'
     + '</head><body><div id="stage"></div>'
     + '<script>' + SHOW_JS + ZOOM_JS + '</script>'
-    + (withMermaid
-      ? '<script src="./mermaid.min.js"></script><script>' + MERMAID_JS + '</script>'
-      : '')
+    + mermaidScripts
     + '</body></html>';
 }

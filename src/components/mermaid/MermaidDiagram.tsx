@@ -64,7 +64,7 @@ function MermaidDiagramInner({ code, cacheKey, dark }: { code: string; cacheKey:
   const type = typeFor(colors);
   const styles = useMemo(() => getStyles(colors, type), [colors]);
   // Anzeige-HTML (Cache/Vollbild) ist statisch — einmal bauen, nicht je Render
-  const shellHtml = useMemo(() => diagramHtml(false), []);
+  const shellHtml = useMemo(() => diagramHtml(), []);
 
   const cached = cacheGet(cacheKey);
   const [svg, setSvg] = useState<string | null>(cached?.svg ?? null);

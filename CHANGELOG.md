@@ -5,6 +5,31 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Erste Geraete-Runde New Architecture: Mermaid-Inline-Fix, Zeichnen-Fabric-Fix
+
+Geraetetest von Roman brachte zwei Treffer, beide behoben. (1) Mermaid:
+„undefined is not an object (evaluating window.mermaid.initialize)“ — die
+renderer.html lud, aber das Geschwister-Skript ./mermaid.min.js wurde nicht
+ausgeführt: WKWebView unter file:// vergibt keine Lese-Rechte fürs Verzeichnis
+und die CSP 'self' matcht file-Ursprünge nicht. Fix an der Wurzel: Mermaid wird
+jetzt INLINIERT in die eine renderer.html geschrieben (3,6 MB, einmalig beim
+ersten Diagramm; „</script“ im Quelltext wird zu „<\/script“ entschärft — in
+der Praxis 0 Vorkommen, verifiziert). Keine Sub-Ressource mehr, CSP nur noch
+script-src 'unsafe-inline'. Verifikation: Inline-Quelltext per Node-VM
+ausgeführt — mermaid.initialize wird definiert; Skript-Tag-Balancierung im
+erzeugten HTML checkefrei. (2) Zeichnen unter Fabric: Striche erschienen
+verzoegert oder gar nicht — Fabric reicht Svg-Kind-Prop-Updates unzuverlaessig
+weiter. Architektur-Aenderung im DrawingEditor: Statt Updates nur noch
+gezielte REMOUNTS — die fertigen Elemente (Szene) und die Laufende Vorschau
+(Stift/Form beim Ziehen) liegen auf ZWEI getrennten Svg-Schichten mit eigenen
+Revisionsnummern; jede Aenderung mountet die jeweilige Schicht frisch (nur
+neue native Nodes), Prop-Updates auf Svg-Kindern gibt es nicht mehr. Cmd:
+Zeichnen zeigte sofort, Undo/Redo/Radieren/Loeschen ebenfalls. Verifikation:
+tsc fehlerfrei, Release-Bundle, Build + Installation aufs Geraet in dieser
+Runde. Offen bewusst: Zoom/Pan aktualisiert noch das viewBox-Attribut beider
+Svg-Wurzeln (Prop-Update) — falls sich der Zoom auf dem Geraet nicht fluessig
+anwendet, wird das als Naechnstes auf dieselbe Remount-Strategie umgestellt.
+
 ## 2026-11-22 — Umstieg auf die New Architecture + nativer Live-Markdown-Editor
 
 Entscheidung von Roman: komplette Migration der App auf die React Native New

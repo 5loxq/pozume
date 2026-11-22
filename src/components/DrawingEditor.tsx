@@ -394,8 +394,16 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const elementsRef = useRef<DrawEl[]>(init.els.map((e) => ({ ...e })));
   const rawRef = useRef<ExcElement[]>(init.raw);
   const viewBoxRef = useRef<[number, number]>(init.viewBox);
-  const [, setRender] = useState(0);
-  const bump = () => setRender((n) => n + 1);
+  // Fabric-Nummerierungen: Updates an Svg-Kindern sind unter Fabric
+  // unzuverlässig (Striche erschienen verzögert oder gar nicht). Statt
+  // Prop-Updates setzen wir auf gezielte REMOUNTS: Die fertigen Elemente
+  // (Szene) und die laufende Vorschau (preview) liegen auf ZWEI getrennten
+  // Svg-Schichten mit eigenen Revisionsnummern — ein Remount erzeugt nur
+  // neue native Nodes statt Updates, das ist auf beiden Architekturen sofort.
+  const [sceneRev, setSceneRev] = useState(0);
+  const [previewRev, setPreviewRev] = useState(0);
+  const bumpScene = () => setSceneRev((n) => n + 1);
+  const bumpPreview = () => setPreviewRev((n) => n + 1);
 
   // Zoom + Pan (1.8): sichtbarer Szenen-Ausschnitt; z=1 zeigt die ganze Fläche
   const [view, setView] = useState<ViewPort>({ z: 1, x: 0, y: 0 });
@@ -441,7 +449,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     viewRef.current = clampView(viewRef.current);
     setView(viewRef.current);
     dirtyRef.current = true;
-    bump();
+    bumpScene();
     commit();
   };
   const undo = () => {
@@ -530,7 +538,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
       const b = drawElBounds(el);
       return !(cx >= b.x0 - 8 && cx <= b.x1 + 8 && cy >= b.y0 - 8 && cy <= b.y1 + 8);
     });
-    if (elementsRef.current.length !== before) { dirtyRef.current = true; bump(); }
+    if (elementsRef.current.length !== before) { dirtyRef.current = true; bumpScene(); }
   };
 
   const addText = () => {
@@ -548,7 +556,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     });
     growViewBox(elementsRef.current[elementsRef.current.length - 1]);
     dirtyRef.current = true;
-    bump();
+    bumpScene();
     commit();
   };
 
@@ -596,7 +604,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         if (elementsRef.current.some((el) => el.id === 'preview')) {
           elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
           dirtyRef.current = true;
-          bump();
+          bumpPreview();
           commit();
         }
         const v = viewRef.current;
@@ -634,14 +642,14 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         const preview: DrawEl = { id: 'preview', type: 'path', d: penPointsRef.current.join(' '), stroke: L.color, strokeWidth: L.width, fill: 'none' };
         elementsRef.current = [...elementsRef.current.filter((el) => el.id !== 'preview'), preview];
         dirtyRef.current = true;
-        bump();
+        bumpPreview();
       } else if (L.tool === 'erase') {
         eraseAt(x, y);
       } else {
         const preview = makeShape(L.tool, s, { x, y }, L.color, L.width);
         elementsRef.current = [...elementsRef.current.filter((el) => el.id !== 'preview'), preview];
         dirtyRef.current = true;
-        bump();
+        bumpPreview();
       }
     },
     onPanResponderRelease: () => {
@@ -676,7 +684,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         elementsRef.current.push(added);
         growViewBox(added);
         dirtyRef.current = true;
-        bump();
+        bumpScene();
       }
       // Geste hat etwas geändert? Dann den Vorher-Zustand in die Historie (1.7)
       const before = gestureSnapRef.current;
@@ -693,7 +701,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
       if (elementsRef.current.some((el) => el.id === 'preview')) {
         elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
         dirtyRef.current = true;
-        bump();
+        bumpPreview();
         commit();
       }
       startRef.current = null;
@@ -703,7 +711,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const clearAll = () => {
     Alert.alert(t('draw.clearTitle'), t('draw.clearText'), [
       { text: t('common.cancel'), style: 'cancel' },
-      { text: t('common.delete'), style: 'destructive', onPress: () => { pushHistory(snapCurrent()); elementsRef.current = []; dirtyRef.current = true; bump(); commit(); } },
+      { text: t('common.delete'), style: 'destructive', onPress: () => { pushHistory(snapCurrent()); elementsRef.current = []; dirtyRef.current = true; bumpScene(); commit(); } },
     ]);
   };
 
@@ -747,15 +755,28 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           <Text style={styles.toolIcon}>🗑</Text>
         </TouchableOpacity>
       </View>
-      {/* PanResponder liefert locationX/Y relativ zu diesem View — kein Messen nötig */}
+      {/* PanResponder liefert locationX/Y relativ zu diesem View — kein Messen nötig.
+          Zwei Svg-Schichten (Fabric-Strategie, siehe bumpScene/bumpPreview):
+          die fertige Szene remountet nur bei Element-Änderungen, die flüchtige
+          Vorschau (Stift/Form während des Ziehens) ist ein eigenes Svg, das
+          pro Bewegung frisch entsteht — nie Prop-Updates, immer sofort sichtbar. */}
       <View
         style={[styles.canvas, { width: canvasW, height: canvasH }]}
         {...pan.panHandlers}
       >
-        <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
+        <Svg key={`scene-${sceneRev}`} width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
           <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={canvasBg} />
-          {elementsRef.current.map((el) => renderDrawEl(el))}
+          {elementsRef.current.filter((el) => el.id !== 'preview').map((el) => renderDrawEl(el))}
         </Svg>
+        {(() => {
+          const previewEl = elementsRef.current.find((el) => el.id === 'preview');
+          if (!previewEl) return null;
+          return (
+            <Svg key={`preview-${previewRev}`} width={canvasW} height={canvasH} pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
+              {renderDrawEl(previewEl)}
+            </Svg>
+          );
+        })()}
       </View>
       <Modal visible={textPrompt != null} transparent animationType="fade" onRequestClose={() => setTextPrompt(null)}>
         <TouchableOpacity style={styles.textBackdrop} activeOpacity={1} onPress={() => setTextPrompt(null)}>
