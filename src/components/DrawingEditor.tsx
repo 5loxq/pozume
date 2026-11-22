@@ -16,6 +16,11 @@ export type DrawEl = PathEl | RectEl | EllipseEl | LineEl | TextEl;
 
 type Tool = 'pen' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'text' | 'erase';
 
+/** Sichtfenster der Canvas (Zoom + Pan): Szene-Ausschnitt, der gerendert wird */
+interface ViewPort { z: number; x: number; y: number }
+/** Zustands-Snapshot für die Undo/Redo-Historie (1.7) */
+interface EditorSnap { els: DrawEl[]; viewBox: [number, number] }
+
 const COLORS = ['#1a1a1a', '#dc2626', '#2563eb', '#16a34a', '#d97706', '#7c3aed'];
 const WIDTHS = [2, 4, 8];
 const TEXT_FONT_SIZE = 20;
@@ -392,6 +397,77 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const [, setRender] = useState(0);
   const bump = () => setRender((n) => n + 1);
 
+  // Zoom + Pan (1.8): sichtbarer Szenen-Ausschnitt; z=1 zeigt die ganze Fläche
+  const [view, setView] = useState<ViewPort>({ z: 1, x: 0, y: 0 });
+  const viewRef = useRef<ViewPort>(view);
+  const setViewSync = (next: ViewPort) => {
+    viewRef.current = clampView(next);
+    setView(viewRef.current);
+  };
+  const clampView = (v: ViewPort): ViewPort => {
+    const [vw, vh] = viewBoxRef.current;
+    const visW = vw / v.z, visH = vh / v.z;
+    const m = 60; // etwas Überziehen erlauben, damit Ränder erreichbar bleiben
+    return {
+      z: v.z,
+      x: Math.max(-m, Math.min(v.x, Math.max(-m, vw - visW + m))),
+      y: Math.max(-m, Math.min(v.y, Math.max(-m, vh - visH + m))),
+    };
+  };
+
+  // Zwei-Finger-Pinch: Ausgangszustand beim Geste-Beginn
+  const pinchRef = useRef<{ d0: number; z0: number; x0: number; y0: number; m0x: number; m0y: number } | null>(null);
+
+  // Undo/Redo-Historie (1.7): Snapshots des Zustands VOR jeder Änderung
+  const historyRef = useRef<EditorSnap[]>([]);
+  const redoRef = useRef<EditorSnap[]>([]);
+  const gestureSnapRef = useRef<EditorSnap | null>(null);
+  const HISTORY_MAX = 60;
+  const snapCurrent = (): EditorSnap => ({
+    els: elementsRef.current.filter((e) => e.id !== 'preview').map((e) => ({ ...e })),
+    viewBox: [viewBoxRef.current[0], viewBoxRef.current[1]],
+  });
+  const sameSnap = (a: EditorSnap, b: EditorSnap): boolean =>
+    a.viewBox[0] === b.viewBox[0] && a.viewBox[1] === b.viewBox[1]
+    && JSON.stringify(a.els) === JSON.stringify(b.els);
+  const pushHistory = (s: EditorSnap) => {
+    historyRef.current.push(s);
+    if (historyRef.current.length > HISTORY_MAX) historyRef.current.shift();
+    redoRef.current = [];
+  };
+  const applySnap = (s: EditorSnap) => {
+    elementsRef.current = s.els.map((e) => ({ ...e }));
+    viewBoxRef.current = [s.viewBox[0], s.viewBox[1]];
+    viewRef.current = clampView(viewRef.current);
+    setView(viewRef.current);
+    dirtyRef.current = true;
+    bump();
+    commit();
+  };
+  const undo = () => {
+    const h = historyRef.current;
+    if (h.length === 0) return;
+    const before = h.pop()!;
+    redoRef.current.push(snapCurrent());
+    applySnap(before);
+  };
+  const redo = () => {
+    const r = redoRef.current;
+    if (r.length === 0) return;
+    const next = r.pop()!;
+    historyRef.current.push(snapCurrent());
+    applySnap(next);
+  };
+  const zoomBy = (factor: number) => {
+    const [vw, vh] = viewBoxRef.current;
+    const v = viewRef.current;
+    const z1 = Math.max(1, Math.min(12, v.z * factor));
+    // um die Mitte des aktuellen Ausschnitts zoomen
+    const cx = v.x + vw / v.z / 2, cy = v.y + vh / v.z / 2;
+    setViewSync({ z: z1, x: cx - vw / z1 / 2, y: cy - vh / z1 / 2 });
+  };
+  const zoomReset = () => setViewSync({ z: 1, x: 0, y: 0 });
+
   const canvasH = Math.max(320, Math.min(560, winH * 0.52));
   const scale = canvasH / viewBoxRef.current[1];
   const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
@@ -458,6 +534,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     const text = textDraft.trim();
     setTextDraft('');
     if (!pos || !text) return;
+    pushHistory(snapCurrent());
     elementsRef.current.push({
       id: nextId(), type: 'text',
       x: pos.x, y: pos.y,
@@ -475,10 +552,26 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       const L = latest.current;
+      // Zwei-Finger-Geste ab Start: Zoom + Pan statt Zeichnen (1.8)
+      const ts = e.nativeEvent.touches;
+      if (ts.length >= 2) {
+        const dx = ts[1].pageX - ts[0].pageX, dy = ts[1].pageY - ts[0].pageY;
+        const v = viewRef.current;
+        pinchRef.current = {
+          d0: Math.sqrt(dx * dx + dy * dy) || 1, z0: v.z, x0: v.x, y0: v.y,
+          m0x: (ts[0].pageX + ts[1].pageX) / 2, m0y: (ts[0].pageY + ts[1].pageY) / 2,
+        };
+        gestureSnapRef.current = null;
+        startRef.current = null;
+        return;
+      }
       // locationX/Y sind bereits relativ zum Canvas-View — kein measureInWindow nötig
       // (das ist async und lieferte in einer ScrollView je nach Scrollstand falsche Werte)
-      const x = e.nativeEvent.locationX / L.scale;
-      const y = e.nativeEvent.locationY / L.scale;
+      const eff = L.scale * viewRef.current.z;
+      const x = viewRef.current.x + e.nativeEvent.locationX / eff;
+      const y = viewRef.current.y + e.nativeEvent.locationY / eff;
+      // Zustand VOR der (möglichen) Änderung für die Undo-Historie merken (1.7)
+      gestureSnapRef.current = snapCurrent();
       startRef.current = { x, y };
       if (L.tool === 'pen') penPointsRef.current = [`M ${x.toFixed(1)} ${y.toFixed(1)}`];
       if (L.tool === 'erase') eraseAt(x, y);
@@ -490,9 +583,45 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     },
     onPanResponderMove: (e) => {
       const L = latest.current;
+      const ts = e.nativeEvent.touches;
+      // Zweiter Finger kommt mitten in einer laufenden Geste dazu: Zeichnen
+      // abbrechen (Preview entfernen) und in den Zoom/Pan-Modus wechseln.
+      // PanResponder feuert onPanResponderGrant nur zur ersten Berührung.
+      if (!pinchRef.current && ts.length >= 2) {
+        if (elementsRef.current.some((el) => el.id === 'preview')) {
+          elementsRef.current = elementsRef.current.filter((el) => el.id !== 'preview');
+          dirtyRef.current = true;
+          bump();
+          commit();
+        }
+        const v = viewRef.current;
+        const ddx = ts[1].pageX - ts[0].pageX, ddy = ts[1].pageY - ts[0].pageY;
+        pinchRef.current = {
+          d0: Math.sqrt(ddx * ddx + ddy * ddy) || 1, z0: v.z, x0: v.x, y0: v.y,
+          m0x: (ts[0].pageX + ts[1].pageX) / 2, m0y: (ts[0].pageY + ts[1].pageY) / 2,
+        };
+        startRef.current = null;
+        gestureSnapRef.current = null;
+        penPointsRef.current = [];
+        return;
+      }
+      // laufende Zwei-Finger-Geste: Zoom um Fingerspitzen-Abstand, Fenster
+      // mit dem Mittelpunkt verschieben — Szenenkoordinaten bleiben fix
+      if (pinchRef.current) {
+        if (ts.length >= 2) {
+          const p = pinchRef.current;
+          const dx = ts[1].pageX - ts[0].pageX, dy = ts[1].pageY - ts[0].pageY;
+          const z1 = Math.max(1, Math.min(12, p.z0 * ((Math.sqrt(dx * dx + dy * dy) || 1) / p.d0)));
+          const eff = L.scale * z1;
+          const mx = (ts[0].pageX + ts[1].pageX) / 2, my = (ts[0].pageY + ts[1].pageY) / 2;
+          setViewSync({ z: z1, x: p.x0 - (mx - p.m0x) / eff, y: p.y0 - (my - p.m0y) / eff });
+        }
+        return;
+      }
       if (L.tool === 'text') return;
-      const x = e.nativeEvent.locationX / L.scale;
-      const y = e.nativeEvent.locationY / L.scale;
+      const eff = L.scale * viewRef.current.z;
+      const x = viewRef.current.x + e.nativeEvent.locationX / eff;
+      const y = viewRef.current.y + e.nativeEvent.locationY / eff;
       const s = startRef.current;
       if (!s) return;
       if (L.tool === 'pen') {
@@ -512,7 +641,13 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     },
     onPanResponderRelease: () => {
       const L = latest.current;
-      if (L.tool === 'text') { startRef.current = null; return; }
+      if (pinchRef.current) {
+        pinchRef.current = null;
+        gestureSnapRef.current = null;
+        startRef.current = null;
+        return;
+      }
+      if (L.tool === 'text') { startRef.current = null; gestureSnapRef.current = null; return; }
       const preview = elementsRef.current.find((el) => el.id === 'preview');
       let added: DrawEl | null = null;
       if (preview) {
@@ -538,10 +673,16 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         dirtyRef.current = true;
         bump();
       }
+      // Geste hat etwas geändert? Dann den Vorher-Zustand in die Historie (1.7)
+      const before = gestureSnapRef.current;
+      gestureSnapRef.current = null;
+      if (before && !sameSnap(before, snapCurrent())) pushHistory(before);
       startRef.current = null;
       commit();
     },
     onPanResponderTerminate: () => {
+      pinchRef.current = null;
+      gestureSnapRef.current = null;
       // Geste extern beendet (z.B. ScrollView übernimmt den Responder): Preview-Element
       // entfernen, damit es nicht dauerhaft mit id "preview" in die Szene serialisiert wird
       if (elementsRef.current.some((el) => el.id === 'preview')) {
@@ -554,18 +695,10 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     },
   })).current;
 
-  const undo = () => {
-    if (elementsRef.current.length === 0) return;
-    elementsRef.current = elementsRef.current.slice(0, -1);
-    dirtyRef.current = true;
-    bump();
-    commit();
-  };
-
   const clearAll = () => {
     Alert.alert(t('draw.clearTitle'), t('draw.clearText'), [
       { text: t('common.cancel'), style: 'cancel' },
-      { text: t('common.delete'), style: 'destructive', onPress: () => { elementsRef.current = []; dirtyRef.current = true; bump(); commit(); } },
+      { text: t('common.delete'), style: 'destructive', onPress: () => { pushHistory(snapCurrent()); elementsRef.current = []; dirtyRef.current = true; bump(); commit(); } },
     ]);
   };
 
@@ -590,8 +723,20 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           </TouchableOpacity>
         ))}
         <View style={styles.sep} />
-        <TouchableOpacity style={styles.toolBtn} onPress={undo}>
+        <TouchableOpacity style={styles.toolBtn} onPress={undo} accessibilityLabel={t('draw.undo')} disabled={historyRef.current.length === 0}>
           <Text style={styles.toolIcon}>↩︎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolBtn} onPress={redo} accessibilityLabel={t('draw.redo')} disabled={redoRef.current.length === 0}>
+          <Text style={styles.toolIcon}>↪︎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolBtn} onPress={() => zoomBy(1 / 1.4)} accessibilityLabel={t('draw.zoomOut')} disabled={view.z <= 1.001}>
+          <Text style={styles.toolIcon}>－</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolBtn} onPress={() => zoomBy(1.4)} accessibilityLabel={t('draw.zoomIn')}>
+          <Text style={styles.toolIcon}>＋</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolBtn} onPress={zoomReset} accessibilityLabel={t('draw.zoomReset')} disabled={view.z <= 1.001 && view.x === 0 && view.y === 0}>
+          <Text style={styles.toolIcon}>⤢</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.toolBtn} onPress={clearAll}>
           <Text style={styles.toolIcon}>🗑</Text>
@@ -602,7 +747,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         style={[styles.canvas, { width: canvasW, height: canvasH }]}
         {...pan.panHandlers}
       >
-        <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`0 0 ${viewBoxRef.current[0]} ${viewBoxRef.current[1]}`}>
+        <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
           <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={colors.surface} />
           {elementsRef.current.map((el) => renderDrawEl(el))}
         </Svg>

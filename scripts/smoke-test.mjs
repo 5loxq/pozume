@@ -175,6 +175,44 @@ async function main() {
       const del = await send(`/notes/${tempId}/attachments/${data.attachment_id}`, 'DELETE');
       assert(del.ok, 'Loeschen fehlgeschlagen');
     });
+    await check('Mermaid-Roundtrip: Diagramm-Quelltext unveraendert speichern/lesen (3.2)', async () => {
+      const mermaid = '```mermaid\nflowchart TD\n  Start --> Stop\n```';
+      const d = await get(`/notes/${tempId}`);
+      const r = await send(`/notes/${tempId}`, 'PATCH', { content: mermaid, if_version: d.note.version });
+      assert(r.ok, `PATCH fehlgeschlagen: ${r.status}`);
+      const rd = await get(`/notes/${tempId}`);
+      assert(rd.note?.content === mermaid,
+        `Mermaid-Block wurde beim Roundtrip veraendert: ${JSON.stringify(rd.note?.content).slice(0, 80)}`);
+    });
+    await check('Excalidraw-JSON-Roundtrip (3.2)', async () => {
+      const scene = JSON.stringify({
+        type: 'excalidraw', version: 2, source: 'pozume',
+        elements: [{ type: 'rectangle', id: 'smoke1', x: 10, y: 10, width: 80, height: 40,
+          strokeColor: '#1a1a1a', strokeStyle: 'solid', strokeWidth: 1, roughness: 0, opacity: 100,
+          backgroundColor: 'transparent', fillStyle: 'solid', angle: 0, seed: 1, groupIds: [],
+          version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false }],
+        appState: {}, files: {},
+      });
+      const d = await get(`/notes/${tempId}`);
+      const r = await send(`/notes/${tempId}`, 'PATCH', { content: scene, if_version: d.note.version });
+      assert(r.ok, `PATCH fehlgeschlagen: ${r.status}`);
+      const rd = await get(`/notes/${tempId}`);
+      assert(rd.note?.content === scene, 'Excalidraw-Szene wurde beim Roundtrip veraendert');
+    });
+    await check('SVG-Anhang: Upload/Download/Loeschen (3.2)', async () => {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="blue"/></svg>';
+      const form = new FormData();
+      form.append('file', new Blob([svg], { type: 'image/svg+xml' }), 'smoke-diagram.svg');
+      const res = await fetch(`${API}/notes/${tempId}/attachments`, { method: 'POST', headers: H_NOCT, body: form });
+      const data = await res.json().catch(() => ({}));
+      assert(res.ok && data.attachment_id, `Upload fehlgeschlagen: HTTP ${res.status}`);
+      // Inhalt muss unveraendert zurueckkommen — App rendert SVG nativ (DrawingEditor/Preview)
+      const dl = await fetch(`${API}/notes/${tempId}/attachments/${data.attachment_id}`, { headers: H });
+      const text = await dl.text();
+      assert(dl.ok && text.includes('viewBox') && text.includes('circle'), 'SVG-Anhang kommt veraendert zurueck');
+      const del = await send(`/notes/${tempId}/attachments/${data.attachment_id}`, 'DELETE');
+      assert(del.ok, 'Loeschen fehlgeschlagen');
+    });
     await check('Ordner wechseln (PATCH folder_id — offline gequeueute Verschiebungen)', async () => {
       const c = await send('/folders', 'POST', { name: 'smoke-test-folder' });
       const folderId = c.data.folder?.id ?? c.data.id;

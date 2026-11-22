@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { usePalette, spacing, typeFor,
   Palette,
 } from '../theme';
+import MermaidDiagram from './mermaid/MermaidDiagram';
 
 const KEYWORDS = new Set([
   'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'switch', 'case',
@@ -105,19 +106,25 @@ export default function MarkdownView({
         i++;
       }
       i++; // schließenden Zaun überspringen
-      out.push(
-        <View key={k} style={styles.codeBlock}>
-          {lang ? <Text style={styles.codeLang}>{lang}</Text> : null}
-          {codeLines.map((cl, ci) => (
-            <Text key={ci} style={styles.codeLine}>
-              {tokenizeLine(cl).map((tok, ti) => (
-                <Text key={ti} style={styles[`${tok.kind}Token` as const]}>{tok.text}</Text>
-              ))}
-              {'\n'}
-            </Text>
-          ))}
-        </View>,
-      );
+      // Mermaid-Blöcke als Diagramm rendern (2.2); Fallback bei Fehlern übernimmt
+      // MermaidDiagram selbst (einklappbarer Quelltext statt leerem Kasten)
+      if (lang === 'mermaid') {
+        out.push(<MermaidDiagram key={k} code={codeLines.join('\n')} />);
+      } else {
+        out.push(
+          <View key={k} style={styles.codeBlock}>
+            {lang ? <Text style={styles.codeLang}>{lang}</Text> : null}
+            {codeLines.map((cl, ci) => (
+              <Text key={ci} style={styles.codeLine}>
+                {tokenizeLine(cl).map((tok, ti) => (
+                  <Text key={ti} style={styles[`${tok.kind}Token` as const]}>{tok.text}</Text>
+                ))}
+                {'\n'}
+              </Text>
+            ))}
+          </View>,
+        );
+      }
       continue;
     }
     const trimmed = line.trimEnd();
