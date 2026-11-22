@@ -619,6 +619,8 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   const markdownish = isNew || (note?.type ?? '') === 'markdown';
   const richRef = useRef<RichEditorHandle | null>(null);
   const richCmd = (name: string) => { richRef.current?.cmd(name); };
+  // Caret-Format-Zustand der Seite: hebt die Toolbar-Tasten des aktiven Formats hervor
+  const [fmtState, setFmtState] = useState<Record<string, boolean> | null>(null);
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
   // Nicht unterstützte Formate (html, tasklist, …) schreibgeschützt öffnen —
   // Bearbeiten im Text-Editor würde die Struktur beschädigen
@@ -1623,29 +1625,29 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
         />
         {!isExcalidraw && !preview && !formatReadOnly && !serverLocked && markdownish && (
           <View style={styles.fmtRow}>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('bold')} accessibilityLabel={t('editor.fmtBold')}>
-              <Text style={styles.fmtTextBold}>B</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.b && styles.fmtBtnActive]} onPress={() => richCmd('bold')} accessibilityLabel={t('editor.fmtBold')}>
+              <Text style={[styles.fmtTextBold, !!fmtState?.b && styles.fmtTextActive]}>B</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('italic')} accessibilityLabel={t('editor.fmtItalic')}>
-              <Text style={[styles.fmtText, { color: colors.text, fontStyle: 'italic' }]}>I</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.i && styles.fmtBtnActive]} onPress={() => richCmd('italic')} accessibilityLabel={t('editor.fmtItalic')}>
+              <Text style={[styles.fmtText, !!fmtState?.i && styles.fmtTextActive, { fontStyle: 'italic' }]}>I</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('code')} accessibilityLabel={t('editor.fmtCode')}>
-              <Text style={styles.fmtText}>‹›</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.c && styles.fmtBtnActive]} onPress={() => richCmd('code')} accessibilityLabel={t('editor.fmtCode')}>
+              <Text style={[styles.fmtText, !!fmtState?.c && styles.fmtTextActive]}>‹›</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('codeblock')} accessibilityLabel={t('editor.fmtCodeblock')}>
               <Text style={styles.fmtText}>{'{ }'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('h2')} accessibilityLabel={t('editor.fmtHeading')}>
-              <Text style={styles.fmtText}>H2</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.h2 && styles.fmtBtnActive]} onPress={() => richCmd('h2')} accessibilityLabel={t('editor.fmtHeading')}>
+              <Text style={[styles.fmtText, !!fmtState?.h2 && styles.fmtTextActive]}>H2</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('ul')} accessibilityLabel={t('editor.fmtList')}>
-              <Text style={styles.fmtText}>•</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.ul && styles.fmtBtnActive]} onPress={() => richCmd('ul')} accessibilityLabel={t('editor.fmtList')}>
+              <Text style={[styles.fmtText, !!fmtState?.ul && styles.fmtTextActive]}>•</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('ol')} accessibilityLabel={t('editor.fmtNumberList')}>
-              <Text style={styles.fmtText}>1.</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.ol && styles.fmtBtnActive]} onPress={() => richCmd('ol')} accessibilityLabel={t('editor.fmtNumberList')}>
+              <Text style={[styles.fmtText, !!fmtState?.ol && styles.fmtTextActive]}>1.</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('quote')} accessibilityLabel={t('editor.fmtQuote')}>
-              <Text style={styles.fmtText}>❝</Text>
+            <TouchableOpacity style={[styles.fmtBtn, !!fmtState?.q && styles.fmtBtnActive]} onPress={() => richCmd('quote')} accessibilityLabel={t('editor.fmtQuote')}>
+              <Text style={[styles.fmtText, !!fmtState?.q && styles.fmtTextActive]}>❝</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.fmtBtn} onPress={() => richCmd('mermaid')} accessibilityLabel={t('editor.fmtMermaid')}>
               <Text style={styles.fmtText}>📊</Text>
@@ -1679,6 +1681,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
             onChange={(md) => { setContent(md); scheduleSave(); }}
             editable={!serverLocked && !formatReadOnly}
             placeholder={t('editor.contentPlaceholder')}
+            onState={setFmtState}
           />
         ) : (
           <TextInput
@@ -1921,6 +1924,8 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   },
   fmtText: { fontSize: 13, fontWeight: '600', color: colors.text, fontFamily: 'Menlo' },
   fmtTextBold: { fontSize: 13, fontWeight: '800', color: colors.text, fontFamily: 'Menlo' },
+  fmtBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  fmtTextActive: { color: '#fff' },
   contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {
     marginTop: spacing.lg, fontSize: 14, fontWeight: '600', color: colors.primary,

@@ -236,6 +236,33 @@ function pzHtmlToMd(root) {
 var pzEd = document.getElementById('ed');
 var pzTimer = null;
 var pzLastMd = null;
+var pzStateTimer = null;
+/** Aktueller Format-Zustand an der Caret-Position (für die Toolbar) */
+function pzState() {
+  function st(name) { try { return document.queryCommandState(name); } catch (e) { return false; } }
+  var sel = window.getSelection();
+  var n = sel && sel.focusNode;
+  var block = n ? (n.nodeType === 1 ? n : n.parentNode) : null;
+  var tags = [];
+  var t = block;
+  while (t && t !== pzEd && t.tagName) { tags.push(t.tagName); t = t.parentNode; }
+  return {
+    b: st('bold'),
+    i: st('italic'),
+    c: tags.indexOf('CODE') >= 0,
+    h2: tags.indexOf('H1') >= 0 || tags.indexOf('H2') >= 0 || tags.indexOf('H3') >= 0,
+    q: tags.indexOf('BLOCKQUOTE') >= 0,
+    ul: tags.indexOf('UL') >= 0,
+    ol: tags.indexOf('OL') >= 0,
+  };
+}
+function pzPostState() {
+  pzSend({ type: 'state', fmt: pzState() });
+}
+document.addEventListener('selectionchange', function () {
+  clearTimeout(pzStateTimer);
+  pzStateTimer = setTimeout(pzPostState, 120);
+});
 function pzPostMd() {
   var md = pzHtmlToMd(pzEd);
   pzLastMd = md;
@@ -293,21 +320,19 @@ window.__pzCmd = function (name, arg) {
   switch (name) {
     case 'bold': ok = document.execCommand('bold'); break;
     case 'italic': ok = document.execCommand('italic'); break;
-    case 'code': pzWrapCode(); return;
+    case 'code': pzWrapCode(); pzPostState(); return;
     case 'h2': ok = document.execCommand('formatBlock', false, 'H2'); break;
     case 'quote': ok = document.execCommand('formatBlock', false, 'BLOCKQUOTE'); break;
     case 'ul': ok = document.execCommand('insertUnorderedList'); break;
     case 'ol': ok = document.execCommand('insertOrderedList'); break;
     case 'codeblock': ok = document.execCommand('insertHTML', false, '<pre>&nbsp;</pre><p><br></p>'); break;
-    case 'mermaid': pzInsertMermaid(); return;
-    case 'editable': pzEd.contentEditable = (arg === 'yes') ? 'true' : 'false'; return;
+    case 'mermaid': pzInsertMermaid(); pzPostState(); return;
+    case 'editable': pzEd.contentEditable = (arg === 'yes') ? 'true' : 'false'; pzPostState(); return;
     case 'undo': ok = document.execCommand('undo'); break;
     case 'redo': ok = document.execCommand('redo'); break;
     default: return;
   }
-  if (ok !== undefined && ok === false && name !== 'formatBlock' && name !== 'insertUnorderedList' && name !== 'insertOrderedList') {
-    // kein harter Fehler — manche Befehle melden false, wirken aber
-  }
   pzSchedule();
+  pzPostState();
 };
 `;

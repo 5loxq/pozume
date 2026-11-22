@@ -23,10 +23,12 @@ interface Props {
   onChange: (md: string) => void;
   editable: boolean;
   placeholder: string;
+  /** Caret-Format-Zustand für die Toolbar (b/i/c/h2/q/ul/ol) */
+  onState?: (fmt: Record<string, boolean>) => void;
 }
 
 const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor({
-  value, onChange, editable, placeholder,
+  value, onChange, editable, placeholder, onState,
 }, ref) {
   const colors = usePalette();
   // Statische Seite einmal bauen — Farben kommen per __pzInit
@@ -81,6 +83,8 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor({
         lastMdRef.current = msg.md;
         if (typeof msg.height === 'number') setHeight(Math.max(120, Math.min(5000, msg.height)));
         onChange(msg.md);
+      } else if (msg?.type === 'state' && msg.fmt && onState) {
+        onState(msg.fmt);
       }
     } catch { /* Fremde Nachrichten ignorieren */ }
   };

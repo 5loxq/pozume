@@ -349,7 +349,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const type = typeFor(colors);
   // StyleSheet.create ist teuer — nur bei Palette-Wechsel neu erzeugen
   const styles = useMemo(() => getStyles(colors, type), [colors]);
-  const { height: winH } = useWindowDimensions();
+  const { height: winH, width: winW } = useWindowDimensions();
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
@@ -477,8 +477,16 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const zoomReset = () => setViewSync({ z: 1, x: 0, y: 0 });
 
   const canvasH = Math.max(320, Math.min(560, winH * 0.52));
-  const scale = canvasH / viewBoxRef.current[1];
-  const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
+  // Canvas nie breiter als der Bildschirm: Breite Szenen liefen vorher bis
+  // 3400px und liefen unsichtbar über den iPhone-Rand — die Touch-Zuordnung
+  // driftete (Striche erschienen abseits der Finger) und bei Zoom 1 klemmte
+  // das Pan-Fenster auf ±60 Szeneneinheiten („Bild lässt sich nicht verschieben“).
+  // Breite Szenen skalieren statt dessen im Canvas herunter (meet), gezoomt
+  // und geschoben wird über den sichtbaren Ausschnitt.
+  const canvasW = Math.min(winW - spacing.md * 2, 640);
+  // Exakter Anzeige-Maßstab (Szeneneinheiten → Pixel) bei Zoom 1 — mit
+  // xMinYMin-meet entspricht dieser der echten Darstellung, keine Drift.
+  const scale = Math.min(canvasW / viewBoxRef.current[0], canvasH / viewBoxRef.current[1]);
   // Zeichen-Hintergrund: Excalidraw-Szenen tragen ihre eigene Hintergrundfarbe
   // (in der Regel Weiß). Der Farbstift-Default (#1a1a1a) und importierte
   // Striche sind für DIESEN Grund definiert — ein themenabhängiger (dunkler)
@@ -566,7 +574,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     onPanResponderGrant: (e) => {
       const L = latest.current;
       // Zwei-Finger-Geste ab Start: Zoom + Pan statt Zeichnen (1.8)
-      const ts = e.nativeEvent.touches;
+      const ts = e.nativeEvent.touches ?? [];
       if (ts.length >= 2) {
         const dx = ts[1].pageX - ts[0].pageX, dy = ts[1].pageY - ts[0].pageY;
         const v = viewRef.current;
@@ -596,7 +604,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
     },
     onPanResponderMove: (e) => {
       const L = latest.current;
-      const ts = e.nativeEvent.touches;
+      const ts = e.nativeEvent.touches ?? [];
       // Zweiter Finger kommt mitten in einer laufenden Geste dazu: Zeichnen
       // abbrechen (Preview entfernen) und in den Zoom/Pan-Modus wechseln.
       // PanResponder feuert onPanResponderGrant nur zur ersten Berührung.
@@ -764,7 +772,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         style={[styles.canvas, { width: canvasW, height: canvasH }]}
         {...pan.panHandlers}
       >
-        <Svg key={`scene-${sceneRev}`} width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
+        <Svg key={`scene-${sceneRev}`} width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`} preserveAspectRatio="xMinYMin meet">
           <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={canvasBg} />
           {elementsRef.current.filter((el) => el.id !== 'preview').map((el) => renderDrawEl(el))}
         </Svg>
@@ -772,7 +780,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
           const previewEl = elementsRef.current.find((el) => el.id === 'preview');
           if (!previewEl) return null;
           return (
-            <Svg key={`preview-${previewRev}`} width={canvasW} height={canvasH} pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
+            <Svg key={`preview-${previewRev}`} width={canvasW} height={canvasH} pointerEvents="none" style={StyleSheet.absoluteFill} viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`} preserveAspectRatio="xMinYMin meet">
               {renderDrawEl(previewEl)}
             </Svg>
           );

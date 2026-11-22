@@ -5,6 +5,30 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Zweite Geraete-Runde: Zeichnen-Canvas exakt begrenzt (Pan/Mapping-Fix), Tooltip-Aktiv-Zustaende im Rich-Editor
+
+Geraetefeedback von Roman: Mermaid funktioniert; Rich-Editor ok, aber die
+Toolbar zeigt nicht, was aktiviert ist; Zeichnen „funktioniert gar nicht“:
+Zoom moeglich, kein Verschieben, gezeichnete Formen tauchen nicht auf.
+Wurzelfaellen beide im Zeichnen die GLEICHE Ursache: Der Canvas durfte bis
+3400px breit werden und lief auf dem iPhone unsichtbar ueber den Bildschirm-
+rand (breite Excalidraw-Szenen sind die Regel). Erstens driftete dadurch die
+Touch-Zuordnung — Formen wurden abseits der Finger platziert (unsichtbar);
+zweitens klemmte das Pan-Fenster bei Zoom 1 auf ±60 Szeneneinheiten — kein
+Verschieben Liegt nicht am Fabric/Remount. Fix: Canvas ist nie breiter als
+der Bildschirm (mind. 24pt Rand, max 640pt) — breite Szenen skalieren im
+Canvas herunter (preserveAspectRatio xMinYMin meet), und der Anzeige-
+Massstab (min aus Breite/Hoehe) rechnet pixelgenau mit der Touch-Abbildung
+(kein Drift mehr); Zoom + Pan erschliessen jeden Ausschnitt (Pan-Klemme
+funktioniert jetzt, weil bei Zoom 1 die Szene wirklich voll sichtbar ist).
+touches-Zugriff in beiden Gesten-Handlern defensiv (?? [] — ein Wurf dort
+wuerde die komplette Geste zum Schweigen bringen). Toolbar: Die RichEditor-
+Seite meldet jetzt den Format-Zustand an der Caret-Position (selectionchange,
+debounced + nach jedem Befehl): queryCommandState fuer bold/italic,
+Vorfahren-Analyse fuer Code/H1-3/Zitat/Listen; die Toolbar-Tasten heben das
+aktive Format hervor (Primary-Grund, weisse Glyphe). Verifikation: tsc
+fehlerfrei, Release-Bundle; Build + Installation aufs iPhone in dieser Runde.
+
 ## 2026-11-22 — WYSIWYG-Editor (Rich Text): Fett ohne sichtbaren Markdown-Code
 
 Entscheidung von Roman: echter Rich-Text-Editor statt sichtbarer Syntax.
