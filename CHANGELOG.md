@@ -5,6 +5,38 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Umstieg auf die New Architecture + nativer Live-Markdown-Editor
+
+Entscheidung von Roman: komplette Migration der App auf die React Native New
+Architecture — als Fundament für die echte Live-Formatierung beim Tippen.
+Aktiviert über newArchEnabled in app.json UND ios/Podfile.properties.json
+(der Expo-Podfile liest RCT_NEW_ARCH_ENABLED daraus); Podfile.properties war
+vorher "false". Alle Abhängigkeiten sind New-Architecture-fähig (react-native-
+svg 15.8, webview 13.17, NetInfo, AsyncStorage, Screens, SafeArea, die Expo-
+Module 52 inkl. des lokalen pozume-app-group-Moduls); pod install hat den
+Codegen neu konfiguriert (89 Pods), xcodebuild Release baut erfolgreich gegen
+die Fabric-Ziele (React-Fabric/FabricComponents) und die App (inkl.
+Share-Extension + Widget) ist auf dem iPhone von Roman installiert.
+
+Live-Markdown jetzt NATIV statt Overlay-Hack: @expensify/react-native-live-
+markdown 0.1.220 (exakt gepinnt; laut Kompatibilitätstabelle die für RN 0.76
+freigegebene Zeile 0.1.141–0.1.234) + react-native-reanimated 3.16.1 (die
+Worklet-Backend-Abhängigkeit dieser Version; npm-Peer-Konflikt mit reanimated
+4.x umgangen durch korrekte Reihenfolge und exaktes Pinning) +
+expensify-common 2.0.115. Der eingebaute ExpensiMark-Parser kennt *fett*
+(ein Stern) — Pozume schreibt **fett**: deshalb eigener Worklet-Parser
+(parsePozumeMark in src/components/LiveMarkdownInput.tsx), der live rendert:
+**fett** fett, _kursiv_ kursiv (mit derselben Wortgrenzen-Regel wie die
+MarkdownView, snake_case bleibt normal), `code` als Chip, Überschriften-,
+Listen- und Zitat-Präfixe als Syntax farblich, ```-Zaun-Zeilen (inkl.
+mermaid) gedimmt — Markierungen laufen als Worklet im UI-Thread mit, egal
+wie lang die Notiz wird. Das Overlay-Experiment (transparentes TextInput
+über Menlo-Textschicht) ist damit ersetzt — nativer Ansatz ohne Cursor-Risiko.
+Verifikation: tsc fehlerfrei, Release-Bundle (Worklet-Babel-Kompilierung
+durchlaufen), Release-Build BUILD SUCCEEDED auf New Architecture, auf dem
+iPhone installiert. Offen: Verhalten von PanResponder-Zeichnen und WebView
+unter Fabric auf dem Gerät prüfen (erster Geratetest steht aus).
+
 ## 2026-11-22 — Live-Markdown im Editor: **fett** erscheint beim Tippen fett
 
 Wunsch von Roman: Markdown-Formatierung schon beim Schreiben sehen, nicht erst

@@ -1,69 +1,89 @@
-import React, { useMemo, useState } from 'react';
-import { Text, TextInput, View, StyleSheet } from 'react-native';
+import React, { useMemo } from 'react';
+import {
+  MarkdownTextInput,
+  type MarkdownRange,
+} from '@expensify/react-native-live-markdown';
 import { usePalette, type Palette } from '../theme';
 
 /**
- * Live-Markdown-Eingabe: Formatiert Markdown-Syntax, WÄHREND getippt wird —
- * `**fett**` erscheint sofort fett, `_kursiv_` kursiv, `code` als Chip.
- * Die Syntax-Zeichen bleiben sichtbar (leicht gedimmt), damit der Quelltext
- * weiterhin direkt editierbar ist.
+ * Live-Markdown-Eingabe (New Architecture): Formatiert Markdown-Syntax,
+ * WÄHREND getippt wird — `**fett**` erscheint sofort fett, `_kursiv_`
+ * kursiv, `code` als Code. Native Engine (Expensify react-native-live-
+ * markdown), kein Overlay-Hack mehr.
  *
- * Technik: ein transparentes TextInput über einer stylenden Text-Schicht.
- * Beide nutzen Menlo (monospaced) mit identischen Metriken — fette/kursive
- * Glyphen haben in Menlo exakt dieselbe Vorschubbreite wie normaler Text,
- * dadurch bleibt der Cursor trotz Live-Formatierung pixelgenau über dem
- * Zeichen. React-Native-TextInput kann Teilstrings nicht stylen, und die
- * gepflegte Live-Markdown-Bibliothek verlangt die New Architecture, die diese
- * App bewusst nicht nutzt — das Overlay ist der alte-Architektur-Weg.
+ * Der eingebaute ExpensiMark-Parser kennt `*fett*` (ein Stern) — Pozume
+ * (und die eigene MarkdownView) nutzen aber `**fett**` und `_kursiv_`.
+ * Deshalb eigener Worklet-Parser mit derselben Syntax und derselben
+ * Kursiv-Wortgrenzen-Regel (snake_case bleibt normal), damit Editor und
+ * Vorschau identisch interpretieren.
  */
 
-const FONT = 'Menlo';
-const FONT_SIZE = 15;
-const LINE_HEIGHT = 24;
+/** Pozume-Markdown ⇒ Formatierungs-Bereiche (läuft als Worklet im UI-Thread) */
+function parsePozumeMark(input: string): MarkdownRange[] {
+  'worklet';
+  const ranges: MarkdownRange[] = [];
+  // Zaun-Bereiche (``` … ```) zuerst erfassen: Inline-Formatierung therein nicht anwenden
+  const fences: Array<[number, number]> = [];
+  const fenceRe = /^```.*$/gm;
+  let fm: RegExpExecArray | null;
+  while ((fm = fenceRe.exec(input)) !== null) fences.push([fm.index, fm.index + fm[0].length]);
+  const inFence = (start: number, end: number) =>
+    fences.some(([a, b]) => start < b && end > a);
 
-/** Zeilen-Präfixe (Überschriften, Listen, Zitate) farblich abheben */
-function linePrefix(line: string): { prefix: string; rest: string } | null {
-  const m = line.match(/^(#{1,3} |- |\* |\d+\. |> )/);
-  if (!m) return null;
-  return { prefix: m[1], rest: line.slice(m[1].length) };
-}
-
-/** Inline-Tokens (Syntax-Zeichen gedimmt, Inhalt formatiert) */
-function inlineTokens(text: string, styles: ReturnType<typeof getStyles>): Array<{ text: string; style: object }> {
-  const out: Array<{ text: string; style: object }> = [];
-  const re = /(\*\*[^*\n]+\*\*)|(`[^`\n]+`)|(_[^_\n]+_)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  const push = (t: string, s: object) => { if (t) out.push({ text: t, style: s }); };
-  while ((m = re.exec(text)) !== null) {
-    push(text.slice(last, m.index), {});
-    const token = m[0];
-    if (m[1]) {
-      push('**', styles.marker);
-      push(token.slice(2, -2), styles.bold);
-      push('**', styles.marker);
-    } else if (m[2]) {
-      push('`', styles.marker);
-      push(token.slice(1, -1), styles.codeText);
-      push('`', styles.marker);
+  // Zeilenpräfixe: Überschriften, Listen, Zitate, Zaun-Zeilen
+  const lineRe = /^```.*$|^(#{1,3} )|^(> )|^([-*] )|^(\d+\. )/gm;
+  let lm: RegExpExecArray | null;
+  while ((lm = lineRe.exec(input)) !== null) {
+    const tok = lm[0];
+    if (tok.startsWith('```')) {
+      ranges.push({ type: 'syntax', start: lm.index, length: tok.length });
     } else {
-      // Kursiv mit Wortgrenzen (snake_case-Variablen bleiben normal) —
-      // dieselbe Regel wie in der MarkdownView, damit Vorschau und Editor
-      // identisch interpretieren
-      const prev = m.index > 0 ? text[m.index - 1] : '';
-      const next = m.index + token.length < text.length ? text[m.index + token.length] : '';
-      if (!/[A-Za-z0-9_]/.test(prev) && !/[A-Za-z0-9_]/.test(next)) {
-        push('_', styles.marker);
-        push(token.slice(1, -1), styles.italic);
-        push('_', styles.marker);
-      } else {
-        push(token, {});
+      // Präfix als Syntax hervorheben; Überschrift/Blockquote-Inhalt formatieren
+      const prefix = lm[1] ?? lm[2] ?? lm[3] ?? lm[4] ?? tok;
+      ranges.push({ type: 'syntax', start: lm.index, length: prefix.length });
+      if (lm[1]) {
+        ranges.push({ type: 'h1', start: lm.index + prefix.length, length: tok.length - prefix.length });
+      } else if (lm[2]) {
+        ranges.push({ type: 'blockquote', start: lm.index + prefix.length, length: tok.length - prefix.length });
       }
     }
-    last = m.index + token.length;
   }
-  push(text.slice(last), {});
-  return out;
+
+  // Inline-Formatierung: **fett**, `code`, _kursiv_ (Wortgrenzen), [[Wiki-Link]]
+  const re = /(\*\*[^*\n]+\*\*)|(`[^`\n]+`)|(_[^_\n]+_)|(\[\[[^\]\n]+\]\])/g;
+  let m: RegExpExecArray | null;
+  const push = (type: MarkdownRange['type'], start: number, length: number) =>
+    ranges.push({ type, start, length });
+  while ((m = re.exec(input)) !== null) {
+    const tok = m[0];
+    if (inFence(m.index, m.index + tok.length)) continue;
+    if (m[1]) {
+      push('syntax', m.index, 2);
+      push('bold', m.index + 2, tok.length - 4);
+      push('syntax', m.index + tok.length - 2, 2);
+    } else if (m[2]) {
+      push('syntax', m.index, 1);
+      push('code', m.index + 1, tok.length - 2);
+      push('syntax', m.index + tok.length - 1, 1);
+    } else if (m[3]) {
+      // Kursiv-Wortgrenzen wie in der MarkdownView: Nachbarzeichen dürfen
+      // keine Buchstaben/Ziffern/Unterstriche sein (snake_case bleibt normal)
+      const prev = m.index > 0 ? input[m.index - 1] : '';
+      const next = m.index + tok.length < input.length ? input[m.index + tok.length] : '';
+      const boundaryOk = prev !== '' ? !/[A-Za-z0-9_]/.test(prev) : true;
+      const boundaryNext = next !== '' ? !/[A-Za-z0-9_]/.test(next) : true;
+      if (boundaryOk && boundaryNext) {
+        push('syntax', m.index, 1);
+        push('italic', m.index + 1, tok.length - 2);
+        push('syntax', m.index + tok.length - 1, 1);
+      }
+    } else if (m[4]) {
+      push('link', m.index + 2, tok.length - 4);
+      push('syntax', m.index, 2);
+      push('syntax', m.index + tok.length - 2, 2);
+    }
+  }
+  return ranges;
 }
 
 interface Props {
@@ -80,84 +100,37 @@ export default function LiveMarkdownInput({
   value, onChangeText, selection, onSelectionChange, placeholder, placeholderTextColor, editable,
 }: Props) {
   const colors = usePalette();
-  const styles = useMemo(() => getStyles(colors), [colors]);
-  // Höhe des Inhalts nachführen — sonst scrollt das TextInput INTERN und die
-  // Overlay-Schicht würde auseinanderlaufen; so wächst das Feld mit dem Text
-  const [contentH, setContentH] = useState(0);
-  const height = Math.max(280, contentH + 6);
-
-  const overlay = useMemo(() => {
-    const lines = value.split('\n');
-    return lines.map((line, li) => {
-      const nodes: React.ReactNode[] = [];
-      if (line.startsWith('```')) {
-        // Zaun-Zeilen (inkl. mermaid) als Code hervorheben
-        nodes.push(<Text key="f" style={styles.fenceLine}>{line}</Text>);
-      } else {
-        const lp = linePrefix(line);
-        if (lp) {
-          nodes.push(<Text key={`p${li}`} style={styles.lineMarker}>{lp.prefix}</Text>);
-          inlineTokens(lp.rest, styles).forEach((tok, ti) => (
-            nodes.push(<Text key={`t${ti}`} style={tok.style}>{tok.text}</Text>)
-          ));
-        } else {
-          inlineTokens(line, styles).forEach((tok, ti) => (
-            nodes.push(<Text key={`t${ti}`} style={tok.style}>{tok.text}</Text>)
-          ));
-        }
-      }
-      return (
-        <Text key={`l${li}`} style={styles.overlayLine}>
-          {nodes}
-          {'\n'}
-        </Text>
-      );
-    });
-  }, [value, styles]);
-
-
+  // Parser außerhalb des Komponenten-Bodds (Empfehlung der Bibliothek),
+  // Styles nur bei Palette-Wechsel neu erzeugen
+  const markdownStyle = useMemo(() => getMarkdownStyle(colors), [colors]);
+  const inputStyle = useMemo(() => ({
+    fontSize: 16, lineHeight: 24, color: colors.text, minHeight: 280,
+  }), [colors]);
   return (
-    <View style={{ height }}>
-      {/* Overlay: formatierte Darstellung, für Berührungen durchlässig */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-        <Text style={styles.overlay}>{overlay}</Text>
-      </View>
-      {/* Transparente Eingabeschicht: Cursor und Auswahl bleiben sichtbar */}
-      <TextInput
-        style={styles.input}
-        value={value}
-        onChangeText={onChangeText}
-        selection={selection}
-        onSelectionChange={onSelectionChange}
-        placeholder={placeholder}
-        placeholderTextColor={placeholderTextColor}
-        editable={editable}
-        multiline
-        textAlignVertical="top"
-        onContentSizeChange={(e) => setContentH(e.nativeEvent.contentSize.height)}
-        selectionColor={colors.primary}
-        scrollEnabled={false}
-      />
-    </View>
+    <MarkdownTextInput
+      value={value}
+      onChangeText={onChangeText}
+      parser={parsePozumeMark}
+      markdownStyle={markdownStyle}
+      selection={selection}
+      onSelectionChange={onSelectionChange}
+      placeholder={placeholder}
+      placeholderTextColor={placeholderTextColor}
+      editable={editable}
+      multiline
+      textAlignVertical="top"
+      style={inputStyle}
+      selectionColor={colors.primary}
+      scrollEnabled={false}
+    />
   );
 }
 
-const getStyles = (colors: Palette) => StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    fontFamily: FONT, fontSize: FONT_SIZE, lineHeight: LINE_HEIGHT,
-    color: colors.text,
-  },
-  overlayLine: {},
-  input: {
-    flex: 1,
-    fontFamily: FONT, fontSize: FONT_SIZE, lineHeight: LINE_HEIGHT,
-    color: 'transparent', letterSpacing: 0,
-  },
-  marker: { color: colors.textFaint },
-  lineMarker: { color: colors.primary, fontWeight: '700' },
-  bold: { fontWeight: '700' },
-  italic: { fontStyle: 'italic' },
-  codeText: { color: colors.primaryDark, backgroundColor: colors.primarySoft },
-  fenceLine: { color: colors.primary, fontWeight: '600' },
+const getMarkdownStyle = (colors: Palette) => ({
+  // Syntax-Zeichen gedimmt — der Quelltext bleibt sichtbar und editierbar.
+  // Fett/Kursiv rendert die Engine nativ; hier ist nur die Farbe/etc. konfigurierbar
+  syntax: { color: colors.textFaint },
+  link: { color: colors.primary },
+  h1: { fontSize: 18 },
+  code: { color: colors.primaryDark, backgroundColor: colors.primarySoft },
 });
