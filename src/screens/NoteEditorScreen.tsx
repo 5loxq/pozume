@@ -18,6 +18,7 @@ import { enqueueUpload, uploadsFor, removeUpload } from '../api/uploadQueue';
 import { lockNote, unlockNoteRecord, isNoteLocked, verifyPin, hasPin, setPin, pinRetryDelay } from '../api/noteLock';
 import FolderPickerSheet from '../components/FolderPickerSheet';
 import MarkdownView from '../components/MarkdownView';
+import LiveMarkdownInput from '../components/LiveMarkdownInput';
 import PromptModal from '../components/PromptModal';
 import DrawingEditor, { isDrawingContent, emptyDrawingHtml } from '../components/DrawingEditor';
 import { usePalette, spacing, radius, typeFor, primaryButtonFor, shadow,
@@ -1688,17 +1689,14 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
             />
           </View>
         ) : (
-          <TextInput
-            style={styles.contentInput}
-            placeholder={t('editor.contentPlaceholder')}
-            placeholderTextColor={colors.textFaint}
+          <LiveMarkdownInput
             value={content}
             onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
             onSelectionChange={(e) => { selRef.current = { start: e.nativeEvent.selection.start, end: e.nativeEvent.selection.end }; }}
             selection={findSelection}
+            placeholder={t('editor.contentPlaceholder')}
+            placeholderTextColor={colors.textFaint}
             editable={!serverLocked && !formatReadOnly}
-            multiline
-            textAlignVertical="top"
           />
         )}
         <TextInput

@@ -5,6 +5,29 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Live-Markdown im Editor: **fett** erscheint beim Tippen fett
+
+Wunsch von Roman: Markdown-Formatierung schon beim Schreiben sehen, nicht erst
+in der Vorschau. RN-TextInput kann Teilstrings nicht stylen, und die gepflegte
+Live-Markdown-Bibliothek verlangt die New Architecture, die diese App bewusst
+nicht nutzt (newArchEnabled=false) — ein Architekturwechsel nur für dieses
+Feature wäre ein unnötiges Risiko für die ganze App gewesen. Umsetzung als
+Overlay-Verfahren (neu: src/components/LiveMarkdownInput.tsx, keine neue
+native Abhängigkeit): transparentes TextInput über einer live stylenden
+Text-Schicht; beide nutzen Menlo (monospace) mit identischen Metriken —
+fette/kursive Glyphen haben in Menlo dieselbe Vorschubbreite, dadurch bleibt
+der Cursor pixelgenau über dem Zeichen, obwohl die Formatierung live
+mitwächst. Syntax-Zeichen bleiben sichtbar, aber gedimmt (**, _, `) — der
+Quelltext bleibt direkt editierbar und die Speicherung 1:1 beim Server-
+Markdown. Gerendert werden fett, kursiv (mit derselben Wortgrenzen-Regel wie
+die Vorschau — snake_case bleibt normal), Inline-Code als Chip, Zeilenpräfixe
+(Überschriften, Listen, Zitate) in Primärfarbe und Zaun-Zeilen (inkl.
+```mermaid). Das Feld wächst über onContentSizeChange mit dem Inhalt mit,
+damit das TextInput nie intern scrollt und Overlay/Eingabe nicht
+auseinanderlaufen. Verifikation: tsc fehlerfrei, Release-Bundle gebaut,
+Tokenizer per Node-Test (fett/code/kursiv korrekt, some_var bleibt normal),
+Release-Build + Installation aufs iPhone von Roman in dieser Runde.
+
 ## 2026-11-22 — Re-Audit und Grafik-Modernisierung (Design-Pass)
 
 Erneuter Komplett-Durchgang plus visuelle Modernisierung. Audit: tsc fehlerfrei,
