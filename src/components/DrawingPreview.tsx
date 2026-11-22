@@ -15,10 +15,13 @@ export default function DrawingPreview({ content, height = 90 }: Props) {
   const parsed = parseDrawing(content);
   if (!parsed || parsed.els.length === 0) return null;
   const { els, box } = parsed;
+  // Szenen-Hintergrund respektieren (Excalidraw: meist Weiß) — sonst wären
+  // schwarze Striche im Dark Mode unsichtbar
+  const bg = content.match(/"viewBackgroundColor"\s*:\s*"([^"]+)"/)?.[1] ?? '#ffffff';
   return (
-    <View style={[styles.wrap, { height, backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[styles.wrap, { height, backgroundColor: bg, borderColor: colors.border }]}>
       <Svg width="100%" height="100%" viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} preserveAspectRatio="xMidYMid meet">
-        <Rect x={box.x} y={box.y} width={box.w} height={box.h} fill={colors.surface} />
+        <Rect x={box.x} y={box.y} width={box.w} height={box.h} fill={bg} />
         {els.map((el) => renderDrawEl(el))}
       </Svg>
     </View>

@@ -5,6 +5,37 @@ Entspricht den Git-Notizen (git notes) der jeweiligen Commits.
 Hinweis: Der Commit, der den Changelog aktualisiert, kann sich naturgemäß
 nicht selbst enthalten — sein Eintrag folgt mit der nächsten Aktualisierung.
 
+## 2026-11-22 — Testrunde auf dem Gerät (iPhone 13): Dark-Mode-Sichtbarkeit, Editor-Werkzeuge, Preview-Default
+
+Live-Test des Device-Builds durch Roman; fünf gemeldete Punkte, alle behoben.
+(1) DrawingEditor: Die Werkzeugleiste hatte keine Icon-Farbe (RN-Text defaultet
+schwarz) — im Dark Mode unsichtbare Symbole. Icons färben sich jetzt mit
+colors.text, das aktive Werkzeug weiß auf primarieschem Grund. (2) Dieselbe
+Wurzel für „an der Zeichnung nichts ändern können“: Der Canvas-Hintergrund
+folgte dem App-Theme (im Dark Mode fast schwarz), Standard-Stift und alle
+importierten Excalidraw-Striche sind aber auf weiß definiert — es wurde
+gezeichnet, nur unsichtbar. Canvas nutzt jetzt die Szenen-eigene
+appState.viewBackgroundColor (Excalidraw-Default: weiß), DrawingPreview dito
+(Pozume-HTML-Szenen ohne appState → Regex-Fallback weiß). (3) Teilen-Knopf
+oben (↗) und Aktions-Chips (⛓︎) waren textbasiert ohne Farbe — im Dark Mode
+schwarz auf fast schwarz; folderIcon/delete/actionChipIcon bekommen jetzt
+Palette-Farben. (4) „Mermaid zeigt nur Code“ und „fehlender Editor beim
+Schreiben“ haben eine Wurzel: Der Editor öffnete im Schreibmodus, gerendert
+wird nur in der Vorschau (Toggle oben existierte schon, war aber nicht
+offensichtlich). Bestehende Markdown-Notizen öffnen jetzt im Vorschau-Modus
+(neue weiterhin im Schreibmodus), und im Schreibmodus gibt es eine neue
+Format-Werkzeugleiste (Fett, Kursiv, Code, Codeblock, H2, Liste, nummerierte
+Liste, Zitat, Mermaid-Skelett), die am Cursor einfügt bzw. die Auswahl
+umpackt — inklusive NEUem Kursiv-Rendering in der MarkdownView (_kursiv_ mit
+Wortgrenzen-Check, snake_case-Variablen bleiben normal). (5) Tag-Eingabe:
+Speichern funktionierte, aber es fehlte sichtbares Feedback — eingegebene
+Tags erscheinen jetzt als Chips (Tap entfernt). i18n: neue Keys editor.fmt*
+plus aktualisierter editor.boldHint, synchron in de/en/fr/es. Verifikation:
+tsc fehlerfrei, Inline-Tokenizer per Node-Test (kursiv ja, some_var_name
+nein, fett/code/wikilink unverändert), Release-Bundle per expo export:embed,
+xcodebuild Release gegen iPhone von Roman BUILD SUCCEEDED, per devicectl
+installiert (Gerät muss das Entwicklerprofil ggf. einmal vertrauen).
+
 ## 2026-11-22 — Mermaid-Vollrendering (2.1–2.6/3.1) + Zeichnungs-Editor: Undo/Redo und Zoom/Pan (1.7/1.8)
 
 Stufe 1 und 2 der Excalidraw/Mermaid-Baustellenliste. (2.1/3.1) Architekturentscheid: Mermaid wird per sandboxed WebView gerendert — es gibt keine gepflegte native RN-Portierung (alle React-Wrapper brauchen DOM), also mermaid.js 11 als lokal gebündeltes Asset (assets/mermaid.min.mjs, ~3,5 MB, per Metro-assetExts 'mjs' als Roh-Asset, kein CDN-Abruf zur Laufzeit) in eine WebView geladen. Sicherheitsmodell der neuen Komponenten (src/components/mermaid/): CSP default-src 'none' blockt sämtliche Netzwerkzugriffe des Diagramm-Inhalts, Mermaid läuft mit securityLevel 'strict', Diagramm-SVG/Quellcode werden nie ins HTML inline gesetzt sondern per injectJavaScript über innerHTML eingesetzt (fremde Skripte laufen dadurch nicht), setSupportMultipleWindows=false, onShouldStartLoadWithRequest lässt nur die eigene renderer.html/about:blank zu. (2.2) ```mermaid-Blöcke in der MarkdownView rendern als Diagramm-Container statt als Code-Block, Tap-Overlay öffnet Vollbild (WebView selbst pointerEvents none, damit das Notiz-Scrollen erhalten bleibt). (2.6) Syntaxfehler werden als Fehlerkarte mit Mermaid-Meldung angezeigt, der Quelltext bleibt einklappbar sichtbar. (2.4) Theme-Anbindung: mermaid-Config aus der App-Palette (theme 'base' + themeVariables), Dark/Light-Wechsel rendert neu. (2.5) LRU-Cache (20 Einträge) pro Diagramm+Theme — gerenderte SVGs werden ohne erneutes Mermaid-Rendern aus dem Cache eingesetzt (WebView lädt dann nur das statische Anzeige-HTML). (2.3) Vollbild-Modal mit Pinch-Zoom und Ein-Finger-Verschieben (Touch-Handler im WebView-HTML, Diagramm wird im Vollbild auf volle Breite expandiert — mermaids eigene max-width-Deckelung wird inline nur dort überschrieben, weil __fit sie sonst respektiert). Neue Abhängigkeit react-native-webview 13.17.0 (npm install + pod install für iOS ausgeführt; Android-Build muss einmal neu laufen). (1.7) Undo/Redo im DrawingEditor: echte Historie (bis 60 Snapshots von Elementen+viewBox, Zustand VOR jeder Änderung) statt nur „letztes Element löschen“ — Strich, Form, Text, Radier-Gestothek und Alles-löschen sind einzeln rückgängig/wiederherstellbar; Gesten ohne Effekt (Radier-Tipp daneben) landen nicht in der Historie (JSON-Vergleich Vorher/Nachher). (1.8) Zoom + Pan in der Editor-Canvas: Zwei-Finger-Pinch zoomt (1–12×) um den Fingerspitzen-Abstand, paralleles Verschieben beider Finger panned das sichtbare Fenster, zweiter Finger mitten in einer Zeichen-Geste bricht die Preview ab und wechselt in den Zoom/Pan-Modus; zusätzlich Toolbar-Buttons ＋/－/⤢ (Zoom um Ausschnitts-Mitte, Reset; Accessibility-Labels via i18n). (3.2) Smoke-Test um drei Szenarien erweitert: Mermaid-Quelltext-Block und Excalidraw-JSON müssen per PATCH/GET unangetastet durch den Server kommen, SVG-Anhang Upload/Download/Löschen mit unverändertem Inhalt. (3.3) i18n: 16 neue Keys (draw.undo/redo/zoom*, mermaid.*) synchron in de/en/fr/es. Verifikation: tsc fehlerfrei; node --check für den Smoke-Test; renderer.html (gültiges + ungültiges Diagramm) und Cache-/Vollbild-Anzeige e2e in Headless-Chrome getestet (CSP aktiv, mermaid lädt lokal aus dem Dateisystem, gültiges Diagramm rendert und meldet die Geometrie, ungültiges meldet den Syntaxfehler) — NICHT verifiziert: On-Device-Rendering in der echten WebView (iOS/Android) und der Live-Smoke-Test (braucht Server-Zugangsdaten); nach dem Merge einmal `expo run:ios`/`expo run:android` laufen lassen.

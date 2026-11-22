@@ -471,6 +471,11 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
   const canvasH = Math.max(320, Math.min(560, winH * 0.52));
   const scale = canvasH / viewBoxRef.current[1];
   const canvasW = Math.min(viewBoxRef.current[0] * scale, 3400);
+  // Zeichen-Hintergrund: Excalidraw-Szenen tragen ihre eigene Hintergrundfarbe
+  // (in der Regel Weiß). Der Farbstift-Default (#1a1a1a) und importierte
+  // Striche sind für DIESEN Grund definiert — ein themenabhängiger (dunkler)
+  // Canvas-Hintergrund macht Schwarztinte unsichtbar (#Dark-Mode-Bug).
+  const canvasBg = (init.appState as { viewBackgroundColor?: string } | null)?.viewBackgroundColor || '#ffffff';
 
   // Neueste Werte für die Pan-Handler und commit(): useRef(PanResponder.create(...))
   // behält die erste Instanz — ohne diesen Ref würden Tool/Farbe/Breite dauerhaft
@@ -709,7 +714,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
       <View style={[styles.toolbar, shadow]}>
         {tools.map(([tl, icon]) => (
           <TouchableOpacity key={tl} style={[styles.toolBtn, tool === tl && styles.toolBtnActive]} onPress={() => setTool(tl)}>
-            <Text style={styles.toolIcon}>{icon}</Text>
+            <Text style={[styles.toolIcon, tool === tl && styles.toolIconOnPrimary]}>{icon}</Text>
           </TouchableOpacity>
         ))}
         <View style={styles.sep} />
@@ -748,7 +753,7 @@ export default function DrawingEditor({ content, saveAsExcalidrawHtml, onChange 
         {...pan.panHandlers}
       >
         <Svg width={canvasW} height={canvasH} pointerEvents="none" viewBox={`${view.x} ${view.y} ${viewBoxRef.current[0] / view.z} ${viewBoxRef.current[1] / view.z}`}>
-          <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={colors.surface} />
+          <Rect x={0} y={0} width={viewBoxRef.current[0]} height={viewBoxRef.current[1]} fill={canvasBg} />
           {elementsRef.current.map((el) => renderDrawEl(el))}
         </Svg>
       </View>
@@ -803,7 +808,8 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     backgroundColor: colors.bg,
   },
   toolBtnActive: { backgroundColor: colors.primary },
-  toolIcon: { fontSize: 16 },
+  toolIcon: { fontSize: 16, color: colors.text },
+  toolIconOnPrimary: { color: '#fff' },
   sep: { width: 1, height: 22, backgroundColor: colors.border, marginHorizontal: 2 },
   colorDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: 'transparent' },
   colorDotActive: { borderColor: colors.primary },
@@ -812,7 +818,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   widthDot: { borderRadius: 8, backgroundColor: colors.text },
   canvas: {
     borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: '#ffffff',
   },
   textBackdrop: { flex: 1, backgroundColor: 'rgba(21,26,35,0.5)', justifyContent: 'center', paddingHorizontal: spacing.xl },
   textSheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },

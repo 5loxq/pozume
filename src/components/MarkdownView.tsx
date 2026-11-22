@@ -51,43 +51,66 @@ export default function MarkdownView({
   const out: React.ReactNode[] = [];
 
   const renderInline = (text: string, keyBase: string, style: object = {}) => {
-    // **fett**, `code`, [[Notizlink]] und pozume://note/ID in Segmente zerlegen
-    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[\[[^\]\n]+\]\]|pozume:\/\/note\/\d+)/g).filter(Boolean);
-    return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <Text key={`${keyBase}-${i}`} style={[style, styles.bold]}>{part.slice(2, -2)}</Text>;
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return <Text key={`${keyBase}-${i}`} style={[style, styles.code]}>{part.slice(1, -1)}</Text>;
-      }
-      // Wiki-Link [[Notiztitel]] — öffnet die verlinkte Notiz
-      if (part.startsWith('[[') && part.endsWith(']]')) {
-        const title = part.slice(2, -2);
-        return (
+    // **fett**, _kursiv_, `code`, [[Notizlink]] und pozume://note/ID in Segmente zerlegen.
+    // Kursiv nur mit Wortgrenzen (snake_case-Variablen wie some_var_name dürfen
+    // nicht kursiv werden) — daher Nachbarcharaktere prüfen, nicht nur matchen.
+    const re = /(\*\*[^*]+\*\*)|(`[^`]+`)|(\[\[[^\]\n]+\]\])|(pozume:\/\/note\/\d+)|(_[^_\n]+_)/g;
+    const out: React.ReactNode[] = [];
+    let last = 0;
+    let i = 0;
+    let m: RegExpExecArray | null;
+    const pushPlain = (s: string) => {
+      if (s) out.push(<Text key={`${keyBase}-p${i++}`} style={style}>{s}</Text>);
+    };
+    while ((m = re.exec(text)) !== null) {
+      pushPlain(text.slice(last, m.index));
+      const token = m[0];
+      const key = `${keyBase}-${i++}`;
+      if (m[1]) {
+        out.push(<Text key={key} style={[style, styles.bold]}>{token.slice(2, -2)}</Text>);
+      } else if (m[2]) {
+        out.push(<Text key={key} style={[style, styles.code]}>{token.slice(1, -1)}</Text>);
+      } else if (m[3]) {
+        // Wiki-Link [[Notiztitel]] — öffnet die verlinkte Notiz
+        const title = token.slice(2, -2);
+        out.push(
           <Text
-            key={`${keyBase}-${i}`}
+            key={key}
             style={[style, styles.noteLink]}
             onPress={onOpenNoteTitle ? () => onOpenNoteTitle(title) : undefined}
           >
             {title}
-          </Text>
+          </Text>,
         );
+      } else if (m[4]) {
+        const deep = token.match(/^pozume:\/\/note\/(\d+)$/);
+        if (deep) {
+          out.push(
+            <Text
+              key={key}
+              style={[style, styles.noteLink]}
+              onPress={onOpenNoteId ? () => onOpenNoteId(Number(deep[1])) : undefined}
+            >
+              🪶
+            </Text>,
+          );
+        } else {
+          out.push(<Text key={key} style={style}>{token}</Text>);
+        }
+      } else {
+        // Kursiv: Nachbarn dürfen keine Buchstaben/Ziffern sein (snake_case)
+        const prev = m.index > 0 ? text[m.index - 1] : '';
+        const next = m.index + token.length < text.length ? text[m.index + token.length] : '';
+        if (!/[A-Za-z0-9_]/.test(prev) && !/[A-Za-z0-9_]/.test(next)) {
+          out.push(<Text key={key} style={[style, styles.italic]}>{token.slice(1, -1)}</Text>);
+        } else {
+          out.push(<Text key={key} style={style}>{token}</Text>);
+        }
       }
-      // Deep-Link pozume://note/123
-      const deep = part.match(/^pozume:\/\/note\/(\d+)$/);
-      if (deep) {
-        return (
-          <Text
-            key={`${keyBase}-${i}`}
-            style={[style, styles.noteLink]}
-            onPress={onOpenNoteId ? () => onOpenNoteId(Number(deep[1])) : undefined}
-          >
-            🪶
-          </Text>
-        );
-      }
-      return <Text key={`${keyBase}-${i}`} style={style}>{part}</Text>;
-    });
+      last = m.index + token.length;
+    }
+    pushPlain(text.slice(last));
+    return out;
   };
 
   let i = 0;
@@ -171,6 +194,7 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
   h3: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },
   para: { ...type.body, lineHeight: 26 },
   bold: { fontWeight: '700' },
+  italic: { fontStyle: 'italic' },
   code: { fontFamily: 'Menlo', fontSize: 14, backgroundColor: colors.primarySoft, color: colors.primaryDark, borderRadius: 4 },
   noteLink: { color: colors.primary, fontWeight: '600', textDecorationLine: 'underline' },
   li: { flexDirection: 'row', marginBottom: 4, paddingRight: spacing.md },

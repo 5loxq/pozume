@@ -554,7 +554,13 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
     ]);
   };
 
-  const [preview, setPreview] = useState(false);
+  // Bestehende Markdown-Notizen öffnen GERENDERT (Vorschau) — Notizen sollen
+  // beim Öffnen wie ihr Endergebnis aussehen; „Schreiben“ schaltet um.
+  // Neue Notizen starten im Schreibmodus, Nicht-Markdown bleibt Schreibmodus.
+  // (Excalidraw-Notizen zeigt ohnehin der DrawingEditor statt des Markdowns.)
+  const [preview, setPreview] = useState(
+    !isNew && (note?.type ?? '') === 'markdown' && !isDrawingContent(note?.content ?? ''),
+  );
   const [locked, setLocked] = useState(false);
   const [pinPrompt, setPinPrompt] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -606,6 +612,34 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
   };
   // Erkennung über den Inhalt-STATE (nicht die Prop — bei neuen Notizen ist die Prop null)
   const drawingContent = isDrawingContent(content) ? content : svgFallback;
+
+  // --- Formatier-Werkzeugleiste: Markdown-Syntax am Cursor einfügen bzw.
+  // Auswahl umpacken (Fett, Kursiv, Code, Listen, …) ---
+  const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const applyWrap = (before: string, after: string) => {
+    const { start, end } = selRef.current;
+    const next = content.slice(0, start) + before + content.slice(start, end) + after + content.slice(end);
+    setContent(next);
+    const delta = before.length;
+    setFindSelection({ start: start + delta, end: end + delta });
+    scheduleSave();
+  };
+  const applyLine = (prefix: string) => {
+    const { start, end } = selRef.current;
+    const ls = content.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const next = content.slice(0, ls) + prefix + content.slice(ls);
+    setContent(next);
+    setFindSelection({ start: start + prefix.length, end: end + prefix.length });
+    scheduleSave();
+  };
+  const applyMermaid = () => {
+    const { start } = selRef.current;
+    const block = '\n```mermaid\nflowchart TD\n  A --> B\n```\n';
+    const next = content.slice(0, start) + block + content.slice(start);
+    setContent(next);
+    setFindSelection(undefined);
+    scheduleSave();
+  };
   const isExcalidraw = note?.type === 'excalidraw' || drawingContent != null;
   // Nicht unterstützte Formate (html, tasklist, …) schreibgeschützt öffnen —
   // Bearbeiten im Text-Editor würde die Struktur beschädigen
@@ -1608,6 +1642,37 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           onChangeText={(v) => { setHeading(v); scheduleSave(); }}
           editable={!serverLocked && !formatReadOnly}
         />
+        {!isExcalidraw && !preview && !formatReadOnly && !serverLocked && (
+          <View style={styles.fmtRow}>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('**', '**')} accessibilityLabel={t('editor.fmtBold')}>
+              <Text style={styles.fmtText}>B</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('_', '_')} accessibilityLabel={t('editor.fmtItalic')}>
+              <Text style={[styles.fmtText, { fontStyle: 'italic' }]}>I</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('`', '`')} accessibilityLabel={t('editor.fmtCode')}>
+              <Text style={styles.fmtText}>‹›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyWrap('\n```\n', '\n```')} accessibilityLabel={t('editor.fmtCodeblock')}>
+              <Text style={styles.fmtText}>{'{ }'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('## ')} accessibilityLabel={t('editor.fmtHeading')}>
+              <Text style={styles.fmtText}>H2</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('- ')} accessibilityLabel={t('editor.fmtList')}>
+              <Text style={styles.fmtText}>•</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('1. ')} accessibilityLabel={t('editor.fmtNumberList')}>
+              <Text style={styles.fmtText}>1.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={() => applyLine('> ')} accessibilityLabel={t('editor.fmtQuote')}>
+              <Text style={styles.fmtText}>❝</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.fmtBtn} onPress={applyMermaid} accessibilityLabel={t('editor.fmtMermaid')}>
+              <Text style={styles.fmtText}>📊</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {isExcalidraw && drawingContent ? (
           <DrawingEditor
             content={drawingContent}
@@ -1629,6 +1694,7 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
             placeholderTextColor={colors.textFaint}
             value={content}
             onChangeText={(v) => { setContent(v); setFindSelection(undefined); scheduleSave(); }}
+            onSelectionChange={(e) => { selRef.current = { start: e.nativeEvent.selection.start, end: e.nativeEvent.selection.end }; }}
             selection={findSelection}
             editable={!serverLocked && !formatReadOnly}
             multiline
@@ -1644,6 +1710,21 @@ export default function NoteEditorScreen({ client, note, drawing, prefill, initi
           editable={!serverLocked && !formatReadOnly}
           autoCapitalize="none"
         />
+        {/* Eingegebene Tags als Chips — sichtbares Feedback, Tap entfernt */}
+        {tags.split(',').map((s) => s.trim()).filter(Boolean).length > 0 && !serverLocked && !formatReadOnly && (
+          <View style={styles.tagSuggestRow}>
+            {tags.split(',').map((s) => s.trim()).filter(Boolean).map((tag) => (
+              <TouchableOpacity key={tag} style={styles.tagEnteredChip} onPress={() => {
+                const next = tags.split(',').map((x) => x.trim()).filter(Boolean)
+                  .filter((x) => x !== tag).join(', ');
+                setTags(next);
+                scheduleSave();
+              }}>
+                <Text style={styles.tagEnteredText}>#{tag} ✕</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
         {tagSuggestions.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tagSuggestRow}>
             {tagSuggestions
@@ -1828,19 +1909,25 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     paddingHorizontal: spacing.md, paddingVertical: 7,
   },
   actionChipDanger: { backgroundColor: colors.dangerSoft },
-  actionChipIcon: { fontSize: 14 },
+  actionChipIcon: { fontSize: 14, color: colors.text },
   actionChipText: { fontSize: 12, fontWeight: '600', color: colors.primary },
   actionChipTextDanger: { color: colors.danger },
   starBtn: { fontSize: 22, color: colors.textFaint },
-  folderIcon: { fontSize: 20 },
+  folderIcon: { fontSize: 20, color: colors.textMuted },
   reminderActive: { color: colors.primary },
   starActive: { color: colors.star },
-  delete: { fontSize: 20 },
+  delete: { fontSize: 20, color: colors.textMuted },
   content: { padding: spacing.lg, paddingBottom: 60 },
   previewBtn: { color: colors.primary, fontWeight: '700', fontSize: 14, width: 80 },
   previewWrap: { minHeight: 300 },
   meta: { ...type.faint(), textAlign: 'right', marginTop: spacing.lg },
   titleInput: { fontSize: 28, fontWeight: '800', letterSpacing: -0.4, color: colors.text, marginBottom: spacing.md },
+  fmtRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: spacing.md },
+  fmtBtn: {
+    backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6,
+  },
+  fmtText: { fontSize: 13, fontWeight: '600', color: colors.text, fontFamily: 'Menlo' },
   contentInput: { fontSize: 16, lineHeight: 26, color: colors.text, minHeight: 300, letterSpacing: 0.1 },
   tagsInput: {
     marginTop: spacing.lg, fontSize: 14, fontWeight: '600', color: colors.primary,
@@ -1848,6 +1935,12 @@ const getStyles = (colors: Palette, type: ReturnType<typeof typeFor>) => StyleSh
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
   },
   tagSuggestRow: { flexDirection: 'row', flexGrow: 0, marginTop: spacing.sm },
+  tagEnteredChip: {
+    backgroundColor: colors.primary, borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: 5,
+    marginRight: spacing.sm,
+  },
+  tagEnteredText: { fontSize: 12, fontWeight: '700', color: '#fff' },
   tagSuggestChip: {
     backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.border,
     borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 4,
